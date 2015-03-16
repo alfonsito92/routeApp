@@ -206,14 +206,15 @@ public class RouteHandler implements IListenDataPacket {
 
     @Override
     public PacketResult receiveDataPacket(RawPacket inPkt) {
-
+      //Once a packet come the Topology has to be updated
+      updateTopology();
       //First I get the incoming Connector where the packet came.
       NodeConnector ingressConnector = inPkt.getIncomingNodeConnector();
-      //log.debug("The packet came from " + ingressConnector + " NodeConnector");
+      log.trace("The packet came from " + ingressConnector + " NodeConnector");
 
       //Now we obtain the node where we received the packet
       Node node = ingressConnector.getNode();
-      //log.debug("The packet came from " + node + " Node");
+      log.trace("The packet came from " + node + " Node");
 
       Packet pkt = dataPacketService.decodeDataPacket(inPkt);
 
@@ -232,35 +233,39 @@ public class RouteHandler implements IListenDataPacket {
           InetAddress dstAddr = intToInetAddress(ipv4Pkt.getDestinationAddress());
           Object l4Datagram = ipv4Pkt.getPayload();
 
-          //////////////////
-          updateTopology();
-          /////////////////
+          if(l4Datagram instanceof ICMP){
 
-          if(!checkAddress(node, srcAddr)){
-            learnIPAddress(node, srcAddr, ingressConnector);
-          }
+            //First Is necessary to check if the IP are in memory.
+            if(!checkAddress(node, srcAddr)){
+              learnIPAddress(node, srcAddr, ingressConnector);
+            }
 
 
-          NodeConnector egressConnector = getIPNodeConnector(node, dstAddr);
+            NodeConnector egressConnector = getIPNodeConnector(node, dstAddr);
 
-          if(egressConnector == null){
-            floodPacket(inPkt, node, ingressConnector);
-          }
-          else{
-            if(programFlow( srcAddr, srcMAC_B, dstAddr, dstMAC_B, egressConnector, node) ){
-
-              //log.debug("Flow installed on " + node + " in the port " + egressConnector);
-
+            if(egressConnector == null){
+              floodPacket(inPkt, node, ingressConnector);
             }
             else{
-              //log.debug("Error trying to install the flow");
+              if(programFlow( srcAddr, srcMAC_B, dstAddr, dstMAC_B, egressConnector, node) ){
+
+                log.trace("Flow installed on " + node + " in the port " + egressConnector);
+
+              }
+              else{
+                log.trace("Error trying to install the flow");
+              }
+
+              log.debug("Probando edge matriz: " +this.edgeMatrix[1][0]);
+              log.debug("Probando edge matriz: " +this.edgeMatrix[0][0]);
+
+              //Send the packet for the selected Port.
+              inPkt.setOutgoingNodeConnector(egressConnector);
+              this.dataPacketService.transmitDataPacket(inPkt);
             }
-            inPkt.setOutgoingNodeConnector(egressConnector);
-            this.dataPacketService.transmitDataPacket(inPkt);
+
+            return PacketResult.CONSUME;
           }
-
-          return PacketResult.CONSUME;
-
         }
 
       }
@@ -279,14 +284,8 @@ public class RouteHandler implements IListenDataPacket {
 
       Map<Node, InetAddress> temp = new HashMap<Node, InetAddress>();
       temp.put(node, addr);
-      log.debug("El temp es " + temp);
-      if(this.tableIP.containsKey(temp)){
-        log.debug("Hola hermosa");
-        return true;
-      }
-      else{
-        return false;
-      }
+      return this.tableIP.containsKey(temp);
+
     }
 
     /**
@@ -301,7 +300,6 @@ public class RouteHandler implements IListenDataPacket {
 
       Map<Node, InetAddress> temp = new HashMap<Node, InetAddress>();
       temp.put(node, addr);
-      log.debug("Guardando: " + temp + " con el connector " + connector);
       this.tableIP.put(temp, connector);
 
     }
@@ -317,7 +315,6 @@ public class RouteHandler implements IListenDataPacket {
 
       Map<Node, InetAddress> temp = new HashMap<Node, InetAddress>();
       temp.put(node, addr);
-      log.debug("El temp es " + temp + " y los que tengo guardados " +this.tableIP);
       return this.tableIP.get(temp);
 
     }
@@ -396,14 +393,15 @@ public class RouteHandler implements IListenDataPacket {
     /**
     *Function that is called when is necessary update the current Topology store
     */
+
     private void updateTopology(){
 
       Map<Node, Set<Edge>> edges = this.topologyManager.getNodeEdges();
-      //log.debug("The map is: " + edges); //Se coloca aquí para poder visualizar
+      log.trace("The map is: " + edges); //Se coloca aquí para poder visualizar
       if(nodeEdges.equals(null) || !nodeEdges.equals(edges)){
         this.nodeEdges = edges;
         buildEdgeMatrix(edges);
-        //log.debug("The new map is " + this.nodeEdges);
+        log.trace("The new map is " + this.nodeEdges);
       }
     }
 
@@ -457,13 +455,8 @@ public class RouteHandler implements IListenDataPacket {
       int node2 = getNodeConnectorIndex(edge.getTailNodeConnector());
 
       this.edgeMatrix[node1][node2] = edge;
-      //log.debug("Put the edge in the position: " + node1 + " " +node2);
+      log.trace("Put the edge in the position: " + node1 + " " +node2);
 
     }
-
-
-
-
-
 
 }
