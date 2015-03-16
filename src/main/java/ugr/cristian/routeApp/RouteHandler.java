@@ -86,20 +86,24 @@ public class RouteHandler implements IListenDataPacket {
 
   private Edge edgeMatrix[][];
 
+  private Long latencyMatrix[][];
+  private Map<Edge, Set<Packet>> edgePackets = new HashMap<Edge, Set<Packet>>();
+  private ConcurrentMap<Map<Edge, Packet>, Long> packetTime = new ConcurrentHashMap<Map<Edge, Packet>, Long>();
+
   private short idleTimeOut = 30;
   private short hardTimeOut = 60;
 
   static private InetAddress intToInetAddress(int i) {
-        byte b[] = new byte[] { (byte) ((i>>24)&0xff), (byte) ((i>>16)&0xff), (byte) ((i>>8)&0xff), (byte) (i&0xff) };
-        InetAddress addr;
-        try {
-            addr = InetAddress.getByAddress(b);
-        } catch (UnknownHostException e) {
-            return null;
-        }
-
-        return addr;
+    byte b[] = new byte[] { (byte) ((i>>24)&0xff), (byte) ((i>>16)&0xff), (byte) ((i>>8)&0xff), (byte) (i&0xff) };
+    InetAddress addr;
+    try {
+        addr = InetAddress.getByAddress(b);
+    } catch (UnknownHostException e) {
+        return null;
     }
+
+    return addr;
+  }
 
 
     /**
@@ -234,7 +238,8 @@ public class RouteHandler implements IListenDataPacket {
           Object l4Datagram = ipv4Pkt.getPayload();
 
           if(l4Datagram instanceof ICMP){
-
+            Edge upEdge = getUpEdge(node, ingressConnector);
+            calculateLatency(upEdge, pkt);
             //First Is necessary to check if the IP are in memory.
             if(!checkAddress(node, srcAddr)){
               learnIPAddress(node, srcAddr, ingressConnector);
@@ -256,12 +261,13 @@ public class RouteHandler implements IListenDataPacket {
                 log.trace("Error trying to install the flow");
               }
 
-              log.debug("Probando edge matriz: " +this.edgeMatrix[1][0]);
-              log.debug("Probando edge matriz: " +this.edgeMatrix[0][0]);
+              Edge downEdge = getDownEdge(node, egressConnector);
 
               //Send the packet for the selected Port.
               inPkt.setOutgoingNodeConnector(egressConnector);
               this.dataPacketService.transmitDataPacket(inPkt);
+
+              putPacket(downEdge, pkt);
             }
 
             return PacketResult.CONSUME;
@@ -280,6 +286,7 @@ public class RouteHandler implements IListenDataPacket {
     *@param addr The IPAddress which is necessary to check
     *@return The boolean which shows if the Address are or not.
     */
+
     private boolean checkAddress(Node node, InetAddress addr){
 
       Map<Node, InetAddress> temp = new HashMap<Node, InetAddress>();
@@ -330,13 +337,16 @@ public class RouteHandler implements IListenDataPacket {
 
         Set<NodeConnector> nodeConnectors =
         this.switchManager.getUpNodeConnectors(node);
+        Packet pkt = dataPacketService.decodeDataPacket(inPkt);
 
         for (NodeConnector p : nodeConnectors) {
           if (!p.equals(ingressConnector)) {
             try {
+              Edge downEdge = getDownEdge(node, p);
               RawPacket destPkt = new RawPacket(inPkt);
               destPkt.setOutgoingNodeConnector(p);
               this.dataPacketService.transmitDataPacket(destPkt);
+              putPacket(downEdge, pkt);
             }
             catch (ConstructionException e2) {
               continue;
@@ -457,6 +467,131 @@ public class RouteHandler implements IListenDataPacket {
       this.edgeMatrix[node1][node2] = edge;
       log.trace("Put the edge in the position: " + node1 + " " +node2);
 
+    }
+
+    /**
+    *Function that is called when is necessary to obtain a Edge through a NodeConnector
+    *We suppose that each NodeConnector has only one Edge and the nodeConnector is the head
+    *@param node The actual node
+    *@param connector The NodeConnector which identify the Edge
+    *@return The Edge corresponding the nodeConnector
+    */
+
+    private Edge getDownEdge(Node node, NodeConnector connector){
+
+        Set<Edge> edges = this.nodeEdges.get(node);
+
+        for(Iterator<Edge> it = edges.iterator(); it.hasNext();){
+          Edge temp = it.next();
+
+          if(temp.getHeadNodeConnector().equals(connector)){
+            log.debug("Find the edge corresponding the connector " + connector + " " + temp);
+            return temp;
+          }
+
+        }
+        return null;
+    }
+
+    /**
+    *Function that is called when is necessary to obtain a Edge through a NodeConnector
+    *We suppose that each NodeConnector has only one Edge and the NodeConnector is the Tail
+    *@param node The actual node
+    *@param connector The NodeConnector which identify the Edge
+    *@return The Edge corresponding the nodeConnector
+    */
+
+    private Edge getUpEdge(Node node, NodeConnector connector){
+      Set<Edge> edges = this.nodeEdges.get(node);
+
+      for(Iterator<Edge> it = edges.iterator(); it.hasNext();){
+        Edge temp = it.next();
+        log.debug("El temp " + temp + " el que busco " + connector);
+        if(temp.getTailNodeConnector().equals(connector)){
+          log.debug("Find the edge corresponding the connector " + connector + " " + temp);
+          return temp;
+        }
+
+      }
+      return null;
+    }
+
+    /**
+    *This function put a new association Edge Packet en the Map and put the thime in the PacketTime map
+    *@parameter edge The edge
+    *@parameter packet The packet
+    */
+
+    private void putPacket(Edge edge, Packet packet){
+
+      Set<Packet> temp = this.edgePackets.get(edge);
+
+      if(temp.contains(packet)){
+        temp.remove(packet);
+        this.edgePackets.remove(edge);
+        this.edgePackets.put(edge, temp);
+        removePacketTime(edge, packet);
+      }
+      else{
+        this.edgePackets.get(edge).add(packet);
+        Long t = System.nanoTime();
+        Map<Edge, Packet> temp2 = new HashMap<Edge, Packet>();
+        temp2.put(edge, packet);
+        this.packetTime.put(temp2, t);
+      }
+
+    }
+
+    /**
+    *This function is called when a association Edge, Packet, Time are wrong.
+    *@param edge The edge identificator
+    *@param packet The packet
+    */
+
+    private void removePacketTime(Edge edge, Packet packet){
+
+      Map<Edge, Packet> temp = new HashMap<Edge, Packet>();
+      temp.put(edge, packet);
+      this.packetTime.remove(temp);
+
+    }
+
+    /**
+    *This function is called when a Packet come and is necessary to calculate the latency
+    *@param edge The associate edge
+    *@param packet The packet which came just now
+    */
+
+    private void calculateLatency(Edge edge, Packet packet){
+
+      Set<Packet> temp = this.edgePackets.get(edge);
+
+      if(temp.contains(packet)){
+        this.edgePackets.get(edge).remove(packet);
+        Long t2 = System.nanoTime();
+        Map<Edge, Packet> temp2 = new HashMap<Edge, Packet>();
+        temp2.put(edge, packet);
+        Long t1 = this.packetTime.get(temp2);
+        this.packetTime.remove(temp2);
+        Long t = t2-t1;
+
+        updateLatencyMatrix(edge, t);
+      }
+    }
+
+    /**
+    *The follow function update the latencyMatrix for the position of the edge
+    *@param edge The edge
+    *@param t The latency time.
+    */
+
+    private void updateLatencyMatrix(Edge edge, Long t){
+
+      int node1 = getNodeConnectorIndex(edge.getHeadNodeConnector());
+      int node2 = getNodeConnectorIndex(edge.getTailNodeConnector());
+
+      this.latencyMatrix[node1][node2] = t;
+      log.trace("Put the Latency: " + t + " in the position: " + node1 + " " +node2);
     }
 
 }
