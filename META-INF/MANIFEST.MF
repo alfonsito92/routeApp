@@ -1,0 +1,27 @@
+Manifest-Version: 1.0
+Bnd-LastModified: 1426418253587
+Build-Jdk: 1.7.0_75
+Built-By: cristian
+Bundle-Activator: ugr.cristian.routeApp.Activator
+Bundle-ManifestVersion: 2
+Bundle-Name: routeApp
+Bundle-SymbolicName: ugr.cristian.routeApp
+Bundle-Version: 1.0.0.SNAPSHOT
+Created-By: Apache Maven Bundle Plugin
+Export-Package: ugr.cristian.routeApp;uses:="org.opendaylight.controller
+ .sal.flowprogrammer,org.opendaylight.controller.sal.core,org.opendaylig
+ ht.controller.statisticsmanager,org.opendaylight.controller.topologyman
+ ager,org.apache.felix.dm,org.opendaylight.controller.switchmanager,org.
+ opendaylight.controller.sal.packet,org.slf4j,org.opendaylight.controlle
+ r.sal.utils,org.opendaylight.controller.sal.action,org.opendaylight.con
+ troller.sal.match";version="1.0.0.SNAPSHOT"
+Import-Package: org.apache.felix.dm;version="[3.0,4)",org.opendaylight.c
+ ontroller.sal.action;version="[0.7,1)",org.opendaylight.controller.sal.
+ core;version="[0.7,1)",org.opendaylight.controller.sal.flowprogrammer;v
+ ersion="[0.7,1)",org.opendaylight.controller.sal.match;version="[0.7,1)
+ ",org.opendaylight.controller.sal.packet;version="[0.7,1)",org.opendayl
+ ight.controller.sal.utils;version="[0.7,1)",org.opendaylight.controller
+ .statisticsmanager;version="[0.5,1)",org.opendaylight.controller.switch
+ manager;version="[0.7,1)",org.opendaylight.controller.topologymanager;v
+ ersion="[0.4,1)",org.slf4j;version="[1.7,2)"
+Tool: Bnd-1.50.0
