@@ -35,6 +35,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.Set;
+import java.util.HashSet;
 
 import org.opendaylight.controller.sal.action.Action;
 import org.opendaylight.controller.sal.action.Output;
@@ -90,8 +91,15 @@ public class RouteHandler implements IListenDataPacket {
   private Map<Edge, Set<Packet>> edgePackets = new HashMap<Edge, Set<Packet>>();
   private ConcurrentMap<Map<Edge, Packet>, Long> packetTime = new ConcurrentHashMap<Map<Edge, Packet>, Long>();
 
+  private boolean firstPacket=true;
+
+  private Packet lastPakect = null;
+
   private short idleTimeOut = 30;
   private short hardTimeOut = 60;
+
+  ///////////////////
+  Packet lastPacket;
 
   static private InetAddress intToInetAddress(int i) {
     byte b[] = new byte[] { (byte) ((i>>24)&0xff), (byte) ((i>>16)&0xff), (byte) ((i>>8)&0xff), (byte) (i&0xff) };
@@ -238,8 +246,13 @@ public class RouteHandler implements IListenDataPacket {
           Object l4Datagram = ipv4Pkt.getPayload();
 
           if(l4Datagram instanceof ICMP){
-            Edge upEdge = getUpEdge(node, ingressConnector);
-            calculateLatency(upEdge, pkt);
+            if(!hasHostConnected(ingressConnector)){
+              Edge upEdge = getUpEdge(node, ingressConnector);
+              if(upEdge != null){
+                calculateLatency(upEdge, pkt);
+              }
+            }
+
             //First Is necessary to check if the IP are in memory.
             if(!checkAddress(node, srcAddr)){
               learnIPAddress(node, srcAddr, ingressConnector);
@@ -261,15 +274,18 @@ public class RouteHandler implements IListenDataPacket {
                 log.trace("Error trying to install the flow");
               }
 
-              Edge downEdge = getDownEdge(node, egressConnector);
+              if(!hasHostConnected(egressConnector)){
+                Edge downEdge = getDownEdge(node, egressConnector);
+                if(downEdge!= null){
+                  putPacket(downEdge, pkt);
+                }
+              }
 
               //Send the packet for the selected Port.
               inPkt.setOutgoingNodeConnector(egressConnector);
               this.dataPacketService.transmitDataPacket(inPkt);
 
-              putPacket(downEdge, pkt);
             }
-
             return PacketResult.CONSUME;
           }
         }
@@ -342,11 +358,18 @@ public class RouteHandler implements IListenDataPacket {
         for (NodeConnector p : nodeConnectors) {
           if (!p.equals(ingressConnector)) {
             try {
-              Edge downEdge = getDownEdge(node, p);
+
               RawPacket destPkt = new RawPacket(inPkt);
+
+              if(!hasHostConnected(p)){
+                Edge downEdge = getDownEdge(node, p);
+                if(downEdge!=null){
+                  putPacket(downEdge, pkt);
+                }
+              }
               destPkt.setOutgoingNodeConnector(p);
               this.dataPacketService.transmitDataPacket(destPkt);
-              putPacket(downEdge, pkt);
+
             }
             catch (ConstructionException e2) {
               continue;
@@ -485,7 +508,7 @@ public class RouteHandler implements IListenDataPacket {
           Edge temp = it.next();
 
           if(temp.getHeadNodeConnector().equals(connector)){
-            log.debug("Find the edge corresponding the connector " + connector + " " + temp);
+            log.trace("Found the DOWN edge corresponding the connector " + connector + " " + temp);
             return temp;
           }
 
@@ -506,9 +529,9 @@ public class RouteHandler implements IListenDataPacket {
 
       for(Iterator<Edge> it = edges.iterator(); it.hasNext();){
         Edge temp = it.next();
-        log.debug("El temp " + temp + " el que busco " + connector);
+
         if(temp.getTailNodeConnector().equals(connector)){
-          log.debug("Find the edge corresponding the connector " + connector + " " + temp);
+          log.trace("Found the UP edge corresponding the connector " + connector + " " + temp);
           return temp;
         }
 
@@ -526,16 +549,32 @@ public class RouteHandler implements IListenDataPacket {
 
       Set<Packet> temp = this.edgePackets.get(edge);
 
-      if(temp.contains(packet)){
-        temp.remove(packet);
-        this.edgePackets.remove(edge);
-        this.edgePackets.put(edge, temp);
-        removePacketTime(edge, packet);
+      if(temp != null){
+        if(temp.contains(packet)){
+          temp.remove(packet);
+          this.edgePackets.remove(edge);
+          this.edgePackets.put(edge, temp);
+          removePacketTime(edge, packet);
+        }
+        else{
+          temp.add(packet);
+          this.edgePackets.remove(edge);
+          this.edgePackets.put(edge, temp);
+          Long t = System.nanoTime();
+          Map<Edge, Packet> temp2 = new HashMap<Edge, Packet>();
+          temp2.put(edge, packet);
+          this.packetTime.put(temp2, t);
+        }
       }
       else{
-        this.edgePackets.get(edge).add(packet);
+        temp = new HashSet<Packet>();
+        temp.add(packet);
+        this.edgePackets.remove(edge);
+        this.edgePackets.put(edge, temp);
         Long t = System.nanoTime();
+
         Map<Edge, Packet> temp2 = new HashMap<Edge, Packet>();
+
         temp2.put(edge, packet);
         this.packetTime.put(temp2, t);
       }
@@ -565,18 +604,70 @@ public class RouteHandler implements IListenDataPacket {
     private void calculateLatency(Edge edge, Packet packet){
 
       Set<Packet> temp = this.edgePackets.get(edge);
-
-      if(temp.contains(packet)){
-        this.edgePackets.get(edge).remove(packet);
+      if(checkSetPacket(packet, temp)){
+        temp.remove(packet);
+        this.edgePackets.remove(edge);
+        this.edgePackets.put(edge, temp);
         Long t2 = System.nanoTime();
-        Map<Edge, Packet> temp2 = new HashMap<Edge, Packet>();
-        temp2.put(edge, packet);
-        Long t1 = this.packetTime.get(temp2);
-        this.packetTime.remove(temp2);
-        Long t = t2-t1;
+        Long t1 = returnPacketTime(edge, packet);
 
-        updateLatencyMatrix(edge, t);
+        if(t1!=null){
+          Long t = t2-t1;
+          updateLatencyMatrix(edge, t);
+        }
+
       }
+
+    }
+
+    /**
+    *This function return the time for a Edge Packet association
+    *@param edge The edge
+    *@param packet The packet
+    *@return time The stored time
+    */
+
+    private Long returnPacketTime(Edge edge, Packet packet){
+
+      Set<Map<Edge,Packet>> temp = this.packetTime.keySet();
+      Map<Edge, Packet> temp2 = new HashMap<Edge, Packet>();
+      temp2.clear();
+      temp2.put(edge, packet);
+
+      for(Iterator<Map<Edge, Packet>> it = temp.iterator(); it.hasNext();){
+
+        Map<Edge, Packet> temp3 = it.next();
+        if(temp3.equals(temp2)){
+          Long time = this.packetTime.get(temp3);
+          this.packetTime.remove(temp3);
+          log.trace("Returning time for the solicitated packet" +time);
+          return time;
+        }
+      }
+
+      return null;
+
+    }
+
+    /**
+    *This function check is a Packet is contained in a Set<Packet>
+    *@param packet The packet
+    *@param packets The set of packets
+    *@return true if is contained or farse is not
+    */
+
+    private boolean checkSetPacket(Packet packet, Set<Packet> packets){
+
+      for(Iterator<Packet> it = packets.iterator(); it.hasNext();){
+
+        Packet temp = it.next();
+        if(temp.equals(packet)){
+          return true;
+        }
+      }
+
+      return false;
+
     }
 
     /**
@@ -586,6 +677,10 @@ public class RouteHandler implements IListenDataPacket {
     */
 
     private void updateLatencyMatrix(Edge edge, Long t){
+      if(firstPacket){
+        this.latencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
+        firstPacket=false;
+      }
 
       int node1 = getNodeConnectorIndex(edge.getHeadNodeConnector());
       int node2 = getNodeConnectorIndex(edge.getTailNodeConnector());
@@ -593,5 +688,51 @@ public class RouteHandler implements IListenDataPacket {
       this.latencyMatrix[node1][node2] = t;
       log.trace("Put the Latency: " + t + " in the position: " + node1 + " " +node2);
     }
+
+    /**
+    *This function return the NodeConnector where a Host is attached
+    *@param srcIP The inetAddress
+    *@return NodeConnector The NodeConnector where the InetAddress is attached
+    */
+
+    private NodeConnector findHost(InetAddress srcIP){
+
+      Set<NodeConnector> connectors = this.topologyManager.getNodeConnectorWithHost();
+
+      for (Iterator<NodeConnector> it = connectors.iterator(); it.hasNext(); ) {
+         NodeConnector temp = it.next();
+         List<Host> hosts= this.topologyManager.getHostsAttachedToNodeConnector(temp);
+
+         for(Iterator<Host> ith = hosts.iterator(); ith.hasNext();){
+
+           Host temp2 = ith.next();
+           if(temp2.getNetworkAddress().equals(srcIP)){
+             return temp;
+           }
+
+         }
+
+      }
+      return null;
+
+    }
+
+    /**
+    *This function return true if the NodeConnector has some Host attached
+    *@param connector The NodeConnector
+    *@return true if yes or false if not
+    */
+
+    private boolean hasHostConnected(NodeConnector connector){
+
+      if(topologyManager.getHostsAttachedToNodeConnector(connector) != null){
+        return true;
+      }
+      else{
+        return false;
+      }
+
+    }
+
 
 }
