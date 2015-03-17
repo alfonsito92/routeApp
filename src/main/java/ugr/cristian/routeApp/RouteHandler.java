@@ -284,6 +284,9 @@ public class RouteHandler implements IListenDataPacket {
               //Send the packet for the selected Port.
               inPkt.setOutgoingNodeConnector(egressConnector);
               this.dataPacketService.transmitDataPacket(inPkt);
+              //To check the latencyMatrix
+              log.trace("Latency node 1 to node 2 "+this.latencyMatrix[0][1]);
+              log.trace("Latency node 2 to node 1 "+this.latencyMatrix[1][0]);
 
             }
             return PacketResult.CONSUME;
