@@ -298,8 +298,6 @@ public class RouteHandler implements IListenDataPacket {
               //To check the latencyMatrix
               log.trace("Latency node 1 to node 2 "+this.latencyMatrix[0][1]);
               log.trace("Medium Latency node 1 to node 2 "+this.mediumLatencyMatrix[0][1]);
-              log.debug("Maximo bytes transmitidos " +this.maxStatistics.get(transmitBytes));
-
             }
             return PacketResult.CONSUME;
           }
@@ -677,7 +675,7 @@ new flow in a node.
       NodeConnectorStatistics headStatistics = this.statisticsManager.getNodeConnectorStatistics(head);
       NodeConnectorStatistics tailStatistics = this.statisticsManager.getNodeConnectorStatistics(tail);
 
-      Long m1, m2 = 0L;
+      Long m1, m2;
 
       //////////////////////////////////
       ArrayList<Long> tempArray = new ArrayList<Long>();
@@ -691,7 +689,7 @@ new flow in a node.
       tempMap.put(transmitBytes, tempArray);
 
       /////////////////////////////
-      tempArray.clear();
+      tempArray=new ArrayList<Long>();
       m1=headStatistics.getReceiveByteCount();
       m2=tailStatistics.getReceiveByteCount();
       tempArray.add(m1);
@@ -701,7 +699,7 @@ new flow in a node.
 
       tempMap.put(receiveBytes, tempArray);
       //////////////////////////////////
-      tempArray.clear();
+      tempArray=new ArrayList<Long>();
       m1=headStatistics.getTransmitDropCount();
       m2=tailStatistics.getTransmitDropCount();
       tempArray.add(m1);
@@ -711,7 +709,7 @@ new flow in a node.
 
       tempMap.put(transmitDropBytes, tempArray);
       /////////////////////////////////////
-      tempArray.clear();
+      tempArray=new ArrayList<Long>();
       m1=headStatistics.getReceiveDropCount();
       m2=tailStatistics.getReceiveDropCount();
       tempArray.add(m1);
@@ -721,7 +719,7 @@ new flow in a node.
 
       tempMap.put(receiveDropBytes, tempArray);
       ///////////////////////////////////////
-      tempArray.clear();
+      tempArray=new ArrayList<Long>();
       m1=headStatistics.getTransmitErrorCount();
       m2=tailStatistics.getTransmitErrorCount();
       tempArray.add(m1);
@@ -731,7 +729,7 @@ new flow in a node.
 
       tempMap.put(transmitErrorBytes, tempArray);
       ///////////////////////////////////////
-      tempArray.clear();
+      tempArray=new ArrayList<Long>();
       m1=headStatistics.getReceiveErrorCount();
       m2=tailStatistics.getReceiveErrorCount();
       tempArray.add(m1);
@@ -872,7 +870,6 @@ new flow in a node.
     */
 
     private void updateEdgeStatistics(){
-
       this.edgeStatistics.clear();
       Set<Node> tempNodes = this.nodeEdges.keySet();
       for(Iterator<Node> it = tempNodes.iterator(); it.hasNext();){
