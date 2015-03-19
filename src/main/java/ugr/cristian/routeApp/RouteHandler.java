@@ -295,9 +295,7 @@ public class RouteHandler implements IListenDataPacket {
               //Send the packet for the selected Port.
               inPkt.setOutgoingNodeConnector(egressConnector);
               this.dataPacketService.transmitDataPacket(inPkt);
-              //To check the latencyMatrix
-              log.trace("Latency node 1 to node 2 "+this.latencyMatrix[0][1]);
-              log.trace("Medium Latency node 1 to node 2 "+this.mediumLatencyMatrix[0][1]);
+
             }
             return PacketResult.CONSUME;
           }
@@ -829,11 +827,51 @@ new flow in a node.
     }
 
     /**
-    *This function try to assing a weight for the Edge attending the latency and
+    *This function try to assing a weight for each Edge attending the latency and
     *medium latency and other aspects like statistics
     */
 
-    private int standardEdgeWeight(Edge edge){
+    private void standardBuildWeightMatrix(){
+      int l = this.nodeEdges.size();
+      int h = this.nodeEdges.size();
+      this.weightMatrix = new Integer[l][h];
+      for(int i=0; i<l; i++){
+
+        for(int j=0; j<h; j++){
+
+          if(i==j){
+            this.weightMatrix[i][j]=0;
+          }
+          else{
+            if(this.edgeMatrix[i][j]==null){
+              this.weightMatrix[i][j]=null;
+            }
+            else{
+              this.weightMatrix[i][j] = standardLatencyWeight(this.edgeMatrix[i][j]) +
+              standardStatisticsMapWeight(this.edgeMatrix[i][j]);
+            }
+          }
+        }
+      }
+    }
+
+    /**
+    *This function is called when is necessary evaluate the latencyMatrix for an edge
+    *@param edge The edge
+    *@return The int value after the process
+    */
+
+    private int standardLatencyWeight(Edge edge){
+      return 0;
+    }
+
+    /**
+    *This function is called when is necessary evaluate the statisticsMap for an edge
+    *@param edge The edge
+    *@return The int value after the process
+    */
+
+    private int standardStatisticsMapWeight(Edge edge){
       return 0;
     }
 
@@ -898,6 +936,7 @@ new flow in a node.
         this.firstPacket = true;
       }
       updateEdgeStatistics();
+      standardBuildWeightMatrix();
     }
 
 
