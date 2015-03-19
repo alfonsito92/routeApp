@@ -16,3 +16,9 @@ Problem 1. The properties of the link are empty. This problem cause a lot of var
 in the source Code because now It's impossible to know the bandwith or the latency in the
 edges. The temporaly solution is about build a latencyMap through the flood packet and use
 this latency to build the weightMatrix.
+
+*************************THANKS
+Thanks to SDNHubTutorials, SDNtutorials and Frank dürr
+http://sdnhub.org/tutorials/opendaylight/
+http://sdnhub.org/tutorials/opendaylight/
+http://www.frank-durr.de/
