@@ -88,6 +88,7 @@ public class RouteHandler implements IListenDataPacket {
   private Edge edgeMatrix[][];
 
   private Long latencyMatrix[][];
+  private Long minLatency;
   private Long mediumLatencyMatrix[][];
 
   private Map<Edge, Set<Packet>> edgePackets = new HashMap<Edge, Set<Packet>>();
@@ -95,7 +96,7 @@ public class RouteHandler implements IListenDataPacket {
 
   private boolean firstPacket=true;
 
-  private Integer weightMatrix[][];
+  private Long weightMatrix[][];
 
   private ConcurrentMap<Edge, Map<String, ArrayList>> edgeStatistics = new ConcurrentHashMap<Edge, Map<String, ArrayList>>();
   private Map<String, Long> maxStatistics = new HashMap<String, Long>();
@@ -113,6 +114,10 @@ public class RouteHandler implements IListenDataPacket {
   private final String receiveErrorBytes = "Receive Error Bytes";
 
   /***************************************/
+
+  /*************************************/
+  private final Long defaultWeight = 5L; //If we don't have any latency measure
+  /*************************************/
 
   static private InetAddress intToInetAddress(int i) {
     byte b[] = new byte[] { (byte) ((i>>24)&0xff), (byte) ((i>>16)&0xff), (byte) ((i>>8)&0xff), (byte) (i&0xff) };
@@ -351,6 +356,12 @@ public class RouteHandler implements IListenDataPacket {
         if(t1!=null){
           Long t = t2-t1;
           updateLatencyMatrix(edge, t);
+          if(minLatency == null){
+            minLatency=t;
+          }
+          else if(minLatency> t){
+            minLatency=t;
+          }
         }
 
       }
@@ -834,21 +845,24 @@ new flow in a node.
     private void standardBuildWeightMatrix(){
       int l = this.nodeEdges.size();
       int h = this.nodeEdges.size();
-      this.weightMatrix = new Integer[l][h];
+      this.weightMatrix = new Long[l][h];
+
       for(int i=0; i<l; i++){
 
         for(int j=0; j<h; j++){
 
           if(i==j){
-            this.weightMatrix[i][j]=0;
+            this.weightMatrix[i][j]=0L;
           }
           else{
             if(this.edgeMatrix[i][j]==null){
               this.weightMatrix[i][j]=null;
             }
             else{
+
               this.weightMatrix[i][j] = standardLatencyWeight(this.edgeMatrix[i][j]) +
               standardStatisticsMapWeight(this.edgeMatrix[i][j]);
+
             }
           }
         }
@@ -861,8 +875,39 @@ new flow in a node.
     *@return The int value after the process
     */
 
-    private int standardLatencyWeight(Edge edge){
-      return 0;
+    private Long standardLatencyWeight(Edge edge){
+      int i = getNodeConnectorIndex(edge.getHeadNodeConnector());
+      int j = getNodeConnectorIndex(edge.getTailNodeConnector());
+
+      Long ret1 = 0L;
+      Long ret2 = 0L;
+
+      Long weight;
+      if(latencyMatrix!=null){
+        Long temp = this.latencyMatrix[i][j];
+        Long temp2 = this.mediumLatencyMatrix[i][j];
+
+        if(temp == null){
+          ret1=defaultWeight;
+        }
+        else{
+          ret1 = temp/minLatency;
+        }
+
+        if(temp2 == null){
+          ret2=defaultWeight;
+        }
+        else{
+          ret2=temp2/minLatency;
+        }
+      }
+      else{
+        ret1=defaultWeight;
+        ret2=defaultWeight;
+      }
+
+      weight = ret1 + ret2;
+      return weight;
     }
 
     /**
@@ -871,8 +916,8 @@ new flow in a node.
     *@return The int value after the process
     */
 
-    private int standardStatisticsMapWeight(Edge edge){
-      return 0;
+    private Long standardStatisticsMapWeight(Edge edge){
+      return 0L;
     }
 
     /**
