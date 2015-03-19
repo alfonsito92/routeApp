@@ -11,7 +11,7 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 GNU General Public License for more details.
 
-You should have received a copy of the GNU General Public License
+You should have getTransmitErrorCountd a copy of the GNU General Public License
 along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
@@ -88,18 +88,31 @@ public class RouteHandler implements IListenDataPacket {
   private Edge edgeMatrix[][];
 
   private Long latencyMatrix[][];
+  private Long mediumLatencyMatrix[][];
+
   private Map<Edge, Set<Packet>> edgePackets = new HashMap<Edge, Set<Packet>>();
   private ConcurrentMap<Map<Edge, Packet>, Long> packetTime = new ConcurrentHashMap<Map<Edge, Packet>, Long>();
 
   private boolean firstPacket=true;
 
-  private Packet lastPakect = null;
+  private Integer weightMatrix[][];
+
+  private ConcurrentMap<Edge, Map<String, ArrayList>> edgeStatistics = new ConcurrentHashMap<Edge, Map<String, ArrayList>>();
+  private Map<String, Long> maxStatistics = new HashMap<String, Long>();
 
   private short idleTimeOut = 30;
   private short hardTimeOut = 60;
 
-  ///////////////////
-  Packet lastPacket;
+  /*********Statistics Constants**********/
+
+  private final String transmitBytes = "Transmits Bytes";
+  private final String receiveBytes = "Receive Bytes";
+  private final String transmitDropBytes = "Transmit Drop Bytes";
+  private final String receiveDropBytes = "Receive Drop Bytes";
+  private final String transmitErrorBytes = "Transmit Error Bytes";
+  private final String receiveErrorBytes = "Receive Error Bytes";
+
+  /***************************************/
 
   static private InetAddress intToInetAddress(int i) {
     byte b[] = new byte[] { (byte) ((i>>24)&0xff), (byte) ((i>>16)&0xff), (byte) ((i>>8)&0xff), (byte) (i&0xff) };
@@ -112,7 +125,6 @@ public class RouteHandler implements IListenDataPacket {
 
     return addr;
   }
-
 
     /**
      * Sets a reference to the requested DataPacketService
@@ -214,21 +226,25 @@ public class RouteHandler implements IListenDataPacket {
         }
     }
 
-
-
     @Override
     public PacketResult receiveDataPacket(RawPacket inPkt) {
       //Once a packet come the Topology has to be updated
       updateTopology();
       //First I get the incoming Connector where the packet came.
       NodeConnector ingressConnector = inPkt.getIncomingNodeConnector();
+      Packet pkt = dataPacketService.decodeDataPacket(inPkt);
       log.trace("The packet came from " + ingressConnector + " NodeConnector");
 
       //Now we obtain the node where we received the packet
       Node node = ingressConnector.getNode();
       log.trace("The packet came from " + node + " Node");
 
-      Packet pkt = dataPacketService.decodeDataPacket(inPkt);
+      if(!hasHostConnected(ingressConnector)){
+        Edge upEdge = getUpEdge(node, ingressConnector);
+        if(upEdge != null){
+          calculateLatency(upEdge, pkt);
+        }
+      }
 
       if(pkt instanceof Ethernet) {
         //Pass the Ethernet Packet
@@ -246,12 +262,7 @@ public class RouteHandler implements IListenDataPacket {
           Object l4Datagram = ipv4Pkt.getPayload();
 
           if(l4Datagram instanceof ICMP){
-            if(!hasHostConnected(ingressConnector)){
-              Edge upEdge = getUpEdge(node, ingressConnector);
-              if(upEdge != null){
-                calculateLatency(upEdge, pkt);
-              }
-            }
+
 
             //First Is necessary to check if the IP are in memory.
             if(!checkAddress(node, srcAddr)){
@@ -286,7 +297,8 @@ public class RouteHandler implements IListenDataPacket {
               this.dataPacketService.transmitDataPacket(inPkt);
               //To check the latencyMatrix
               log.trace("Latency node 1 to node 2 "+this.latencyMatrix[0][1]);
-              log.trace("Latency node 2 to node 1 "+this.latencyMatrix[1][0]);
+              log.trace("Medium Latency node 1 to node 2 "+this.mediumLatencyMatrix[0][1]);
+              log.debug("Maximo bytes transmitidos " +this.maxStatistics.get(transmitBytes));
 
             }
             return PacketResult.CONSUME;
@@ -296,6 +308,56 @@ public class RouteHandler implements IListenDataPacket {
       }
 
       return PacketResult.IGNORED;
+
+    }
+
+    /**
+    *Function which build the edgeMatrix
+    *@param edges the topologyMap
+    */
+
+    private void buildEdgeMatrix(Map<Node, Set<Edge>> edges){
+
+      this.edgeMatrix = new Edge[edges.size()][edges.size()];
+      Set<Node> nodes = edges.keySet();
+
+      for(Iterator<Node> it = nodes.iterator(); it.hasNext();){
+
+        Node nodeTemp = it.next();
+        Set<Edge> nodeEdges = edges.get(nodeTemp);
+
+        for(Iterator<Edge> it2 = nodeEdges.iterator(); it2.hasNext();){
+
+          Edge edgeTemp = it2.next();
+          putEdge(edgeTemp);
+
+        }
+
+      }
+    }
+
+    /**
+    *This function is called when a Packet come and is necessary to calculate the latency
+    *@param edge The associate edge
+    *@param packet The packet which came just now
+    */
+
+    private void calculateLatency(Edge edge, Packet packet){
+
+      Set<Packet> temp = this.edgePackets.get(edge);
+      if(checkSetPacket(packet, temp)){
+        temp.remove(packet);
+        this.edgePackets.remove(edge);
+        this.edgePackets.put(edge, temp);
+        Long t2 = System.nanoTime();
+        Long t1 = returnPacketTime(edge, packet);
+
+        if(t1!=null){
+          Long t = t2-t1;
+          updateLatencyMatrix(edge, t);
+        }
+
+      }
 
     }
 
@@ -315,33 +377,83 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
-    *Function that is called when is necessary to put a Association Node,IP and NodeConnector
-    *in ourt IPTable.
-    *@param node The node where we have to create the association.
-    *@param InetAddres The IP Address
-    *@param NodeConnector The NodeConnector where the Packet came.
+    *This function check is a Packet is contained in a Set<Packet>
+    *@param packet The packet
+    *@param packets The set of packets
+    *@return true if is contained or farse is not
     */
 
-    private void learnIPAddress(Node node, InetAddress addr, NodeConnector connector){
+    private boolean checkSetPacket(Packet packet, Set<Packet> packets){
 
-      Map<Node, InetAddress> temp = new HashMap<Node, InetAddress>();
-      temp.put(node, addr);
-      this.tableIP.put(temp, connector);
+      for(Iterator<Packet> it = packets.iterator(); it.hasNext();){
+
+        Packet temp = it.next();
+        if(temp.equals(packet)){
+          return true;
+        }
+      }
+
+      return false;
+
+    }
+
+    /**Function that is called when is necessary to compare the statistics
+    *@param m1 The HeadNodeConnector Statistic
+    *@param m2 The tailNodeConnector Statistic
+    *@param compare The string which identify the statistic
+    */
+
+    private void compareStatistic(Long m1, Long m2, String compare){
+
+      Long temp = this.maxStatistics.get(compare);
+
+      if(m1>m2){
+        if(temp==null){
+          temp=m1;
+          this.maxStatistics.put(compare, temp);
+        }else if(m1>temp){
+            temp=m1;
+            this.maxStatistics.remove(compare);
+            this.maxStatistics.put(compare, temp);
+          }
+      }else{
+        if(temp==null){
+          temp=m2;
+          this.maxStatistics.put(compare, temp);
+        }else if(m2>temp){
+            temp=m2;
+            this.maxStatistics.remove(compare);
+            this.maxStatistics.put(compare, temp);
+          }
+      }
 
     }
 
     /**
-    *Function that return the NodeConnector for an Association Node,IP if is possible
-    *@param node The required node
-    *@param InetAddres The IP required
-    *@return NodeConnector The Connector for this association.
+    *This function return the NodeConnector where a Host is attached
+    *@param srcIP The inetAddress
+    *@return NodeConnector The NodeConnector where the InetAddress is attached
     */
 
-    private NodeConnector getIPNodeConnector(Node node, InetAddress addr){
+    private NodeConnector findHost(InetAddress srcIP){
 
-      Map<Node, InetAddress> temp = new HashMap<Node, InetAddress>();
-      temp.put(node, addr);
-      return this.tableIP.get(temp);
+      Set<NodeConnector> connectors = this.topologyManager.getNodeConnectorWithHost();
+
+      for (Iterator<NodeConnector> it = connectors.iterator(); it.hasNext(); ) {
+         NodeConnector temp = it.next();
+         List<Host> hosts= this.topologyManager.getHostsAttachedToNodeConnector(temp);
+
+         for(Iterator<Host> ith = hosts.iterator(); ith.hasNext();){
+
+           Host temp2 = ith.next();
+           if(temp2.getNetworkAddress().equals(srcIP)){
+             return temp;
+           }
+
+         }
+
+      }
+      return null;
 
     }
 
@@ -382,7 +494,118 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
-    *Function that is called when is necesarry to install new flow in a node.
+    *Function that is called when is necessary to obtain a Edge through a NodeConnector
+    *We suppose that each NodeConnector has only one Edge and the nodeConnector is the head
+    *@param node The actual node
+    *@param node The required node
+    *@param InetAddres The IP required
+    *@return NodeConnector The Connector for this association.
+    */
+
+    private NodeConnector getIPNodeConnector(Node node, InetAddress addr){
+
+      Map<Node, InetAddress> temp = new HashMap<Node, InetAddress>();
+      temp.put(node, addr);
+      return this.tableIP.get(temp);
+
+    }
+
+    /**
+    *Function that is called when is necessary to obtain a Edge through a NodeConnector
+    *We suppose that each NodeConnector has only one Edge and the NodeConnector is the Head
+    *@param node The actual node
+    *@param connector The NodeConnector which identify the Edge
+    *@return The Edge corresponding the nodeConnector
+    */
+
+    private Edge getDownEdge(Node node, NodeConnector connector){
+      Set<Edge> edges = this.nodeEdges.get(node);
+
+      for(Iterator<Edge> it = edges.iterator(); it.hasNext();){
+        Edge temp = it.next();
+
+        if(temp.getHeadNodeConnector().equals(connector)){
+          log.trace("Found the DOWN edge corresponding the connector " + connector + " " + temp);
+          return temp;
+        }
+
+      }
+      return null;
+    }
+
+    /**
+    *This method provide the possibility to get a index for a nodeConnector
+    *@param nodeConnector The nodeConnector.
+    */
+
+    private int getNodeConnectorIndex(NodeConnector nodeConnector){
+
+      int index;
+      Node node = nodeConnector.getNode();
+      index = Integer.parseInt(node.getID().toString());
+      return index-1;
+
+    }
+
+    /**
+    *Function that is called when is necessary to obtain a Edge through a NodeConnector
+    *We suppose that each NodeConnector has only one Edge and the NodeConnector is the Tail
+    *@param node The actual node
+    *@param connector The NodeConnector which identify the Edge
+    *@return The Edge corresponding the nodeConnector
+    */
+
+    private Edge getUpEdge(Node node, NodeConnector connector){
+      Set<Edge> edges = this.nodeEdges.get(node);
+
+      for(Iterator<Edge> it = edges.iterator(); it.hasNext();){
+        Edge temp = it.next();
+
+        if(temp.getTailNodeConnector().equals(connector)){
+          log.trace("Found the UP edge corresponding the connector " + connector + " " + temp);
+          return temp;
+        }
+
+      }
+      return null;
+    }
+
+    /**
+    *This function return true if the NodeConnector has some Host attached
+    *@param connector The NodeConnector
+    *@return true if yes or false if not
+    */
+
+    private boolean hasHostConnected(NodeConnector connector){
+
+      if(topologyManager.getHostsAttachedToNodeConnector(connector) != null){
+        return true;
+      }
+      else{
+        return false;
+      }
+
+    }
+
+    /**
+    *Function that is called when is necessary to put a Association Node,IP and NodeConnector
+    *in ourt IPTable.
+    *@param node The node where we have to create the association.
+    *@param InetAddres The IP Address
+    *@param NodeConnector The NodeConnector where the Packet came.
+    */
+
+    private void learnIPAddress(Node node, InetAddress addr, NodeConnector connector){
+
+      Map<Node, InetAddress> temp = new HashMap<Node, InetAddress>();
+      temp.put(node, addr);
+      this.tableIP.put(temp, connector);
+
+    }
+
+    /**
+    *Function that is called when is necesarry to install     private void compareStatistic(Long m1, Long m2, String compare){
+new flow in a node.
     *All the flows will have two timeOut, idle and Hard.
     *@param srcAddr The source IPv4 Address
     *@param srcMAC_B The srcMACAddress in byte format
@@ -427,60 +650,6 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
-    *Function that is called when is necessary update the current Topology store
-    */
-
-    private void updateTopology(){
-
-      Map<Node, Set<Edge>> edges = this.topologyManager.getNodeEdges();
-      log.trace("The map is: " + edges); //Se coloca aquí para poder visualizar
-      if(nodeEdges.equals(null) || !nodeEdges.equals(edges)){
-        this.nodeEdges = edges;
-        buildEdgeMatrix(edges);
-        log.trace("The new map is " + this.nodeEdges);
-      }
-    }
-
-    /**
-    *Function which build the edgeMatrix
-    *@param edges the topologyMap
-    */
-
-    private void buildEdgeMatrix(Map<Node, Set<Edge>> edges){
-
-      this.edgeMatrix = new Edge[edges.size()][edges.size()];
-      Set<Node> nodes = edges.keySet();
-
-      for(Iterator<Node> it = nodes.iterator(); it.hasNext();){
-
-        Node nodeTemp = it.next();
-        Set<Edge> nodeEdges = edges.get(nodeTemp);
-
-        for(Iterator<Edge> it2 = nodeEdges.iterator(); it2.hasNext();){
-
-          Edge edgeTemp = it2.next();
-          putEdge(edgeTemp);
-
-        }
-
-      }
-    }
-
-    /**
-    *This method provide the possibility to get a index for a nodeConnector
-    *@param nodeConnector The nodeConnector.
-    */
-
-    private int getNodeConnectorIndex(NodeConnector nodeConnector){
-
-      int index;
-      Node node = nodeConnector.getNode();
-      index = Integer.parseInt(node.getID().toString());
-      return index-1;
-
-    }
-
-    /**
     *Function that is called when is necessary to put a edge in the edgeMatrix
     *@param edge The edge that it will be put in the matrix.
     */
@@ -496,50 +665,84 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
-    *Function that is called when is necessary to obtain a Edge through a NodeConnector
-    *We suppose that each NodeConnector has only one Edge and the nodeConnector is the head
-    *@param node The actual node
-    *@param connector The NodeConnector which identify the Edge
-    *@return The Edge corresponding the nodeConnector
+    *Function that is called when is necessary to add a Edge to statistics
+    *@param edge The edge
     */
 
-    private Edge getDownEdge(Node node, NodeConnector connector){
+    private void putEdgeStatistics(Edge edge){
 
-        Set<Edge> edges = this.nodeEdges.get(node);
+      NodeConnector head = edge.getHeadNodeConnector();
+      NodeConnector tail = edge.getTailNodeConnector();
 
-        for(Iterator<Edge> it = edges.iterator(); it.hasNext();){
-          Edge temp = it.next();
+      NodeConnectorStatistics headStatistics = this.statisticsManager.getNodeConnectorStatistics(head);
+      NodeConnectorStatistics tailStatistics = this.statisticsManager.getNodeConnectorStatistics(tail);
 
-          if(temp.getHeadNodeConnector().equals(connector)){
-            log.trace("Found the DOWN edge corresponding the connector " + connector + " " + temp);
-            return temp;
-          }
+      Long m1, m2 = 0L;
 
-        }
-        return null;
-    }
+      //////////////////////////////////
+      ArrayList<Long> tempArray = new ArrayList<Long>();
+      m1=headStatistics.getTransmitByteCount();
+      m2=tailStatistics.getTransmitByteCount();
+      tempArray.add(m1);
+      tempArray.add(m2);
+      compareStatistic(m1, m2, transmitBytes);
 
-    /**
-    *Function that is called when is necessary to obtain a Edge through a NodeConnector
-    *We suppose that each NodeConnector has only one Edge and the NodeConnector is the Tail
-    *@param node The actual node
-    *@param connector The NodeConnector which identify the Edge
-    *@return The Edge corresponding the nodeConnector
-    */
+      Map<String, ArrayList> tempMap =  new HashMap<String, ArrayList>();
+      tempMap.put(transmitBytes, tempArray);
 
-    private Edge getUpEdge(Node node, NodeConnector connector){
-      Set<Edge> edges = this.nodeEdges.get(node);
+      /////////////////////////////
+      tempArray.clear();
+      m1=headStatistics.getReceiveByteCount();
+      m2=tailStatistics.getReceiveByteCount();
+      tempArray.add(m1);
+      tempArray.add(m2);
 
-      for(Iterator<Edge> it = edges.iterator(); it.hasNext();){
-        Edge temp = it.next();
+      compareStatistic(m1, m2, receiveBytes);
 
-        if(temp.getTailNodeConnector().equals(connector)){
-          log.trace("Found the UP edge corresponding the connector " + connector + " " + temp);
-          return temp;
-        }
+      tempMap.put(receiveBytes, tempArray);
+      //////////////////////////////////
+      tempArray.clear();
+      m1=headStatistics.getTransmitDropCount();
+      m2=tailStatistics.getTransmitDropCount();
+      tempArray.add(m1);
+      tempArray.add(m2);
 
-      }
-      return null;
+      compareStatistic(m1, m2, transmitDropBytes);
+
+      tempMap.put(transmitDropBytes, tempArray);
+      /////////////////////////////////////
+      tempArray.clear();
+      m1=headStatistics.getReceiveDropCount();
+      m2=tailStatistics.getReceiveDropCount();
+      tempArray.add(m1);
+      tempArray.add(m2);
+
+      compareStatistic(m1, m2, receiveDropBytes);
+
+      tempMap.put(receiveDropBytes, tempArray);
+      ///////////////////////////////////////
+      tempArray.clear();
+      m1=headStatistics.getTransmitErrorCount();
+      m2=tailStatistics.getTransmitErrorCount();
+      tempArray.add(m1);
+      tempArray.add(m2);
+
+      compareStatistic(m1, m2, transmitErrorBytes);
+
+      tempMap.put(transmitErrorBytes, tempArray);
+      ///////////////////////////////////////
+      tempArray.clear();
+      m1=headStatistics.getReceiveErrorCount();
+      m2=tailStatistics.getReceiveErrorCount();
+      tempArray.add(m1);
+      tempArray.add(m2);
+
+      compareStatistic(m1, m2, receiveErrorBytes);
+
+      tempMap.put(receiveErrorBytes, tempArray);
+      ///////////////////////////////////////
+      this.edgeStatistics.put(edge, tempMap);
+
     }
 
     /**
@@ -599,31 +802,6 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
-    *This function is called when a Packet come and is necessary to calculate the latency
-    *@param edge The associate edge
-    *@param packet The packet which came just now
-    */
-
-    private void calculateLatency(Edge edge, Packet packet){
-
-      Set<Packet> temp = this.edgePackets.get(edge);
-      if(checkSetPacket(packet, temp)){
-        temp.remove(packet);
-        this.edgePackets.remove(edge);
-        this.edgePackets.put(edge, temp);
-        Long t2 = System.nanoTime();
-        Long t1 = returnPacketTime(edge, packet);
-
-        if(t1!=null){
-          Long t = t2-t1;
-          updateLatencyMatrix(edge, t);
-        }
-
-      }
-
-    }
-
-    /**
     *This function return the time for a Edge Packet association
     *@param edge The edge
     *@param packet The packet
@@ -653,24 +831,12 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
-    *This function check is a Packet is contained in a Set<Packet>
-    *@param packet The packet
-    *@param packets The set of packets
-    *@return true if is contained or farse is not
+    *This function try to assing a weight for the Edge attending the latency and
+    *medium latency and other aspects like statistics
     */
 
-    private boolean checkSetPacket(Packet packet, Set<Packet> packets){
-
-      for(Iterator<Packet> it = packets.iterator(); it.hasNext();){
-
-        Packet temp = it.next();
-        if(temp.equals(packet)){
-          return true;
-        }
-      }
-
-      return false;
-
+    private int standardEdgeWeight(Edge edge){
+      return 0;
     }
 
     /**
@@ -682,59 +848,59 @@ public class RouteHandler implements IListenDataPacket {
     private void updateLatencyMatrix(Edge edge, Long t){
       if(firstPacket){
         this.latencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
+        this.mediumLatencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
         firstPacket=false;
       }
 
       int node1 = getNodeConnectorIndex(edge.getHeadNodeConnector());
       int node2 = getNodeConnectorIndex(edge.getTailNodeConnector());
 
+      Long temp = this.mediumLatencyMatrix[node1][node2];
+      if(temp == null){
+        this.mediumLatencyMatrix[node1][node2]=t;
+      }
+      else{
+        this.mediumLatencyMatrix[node1][node2] = (t + temp)/2;
+      }
+
       this.latencyMatrix[node1][node2] = t;
       log.trace("Put the Latency: " + t + " in the position: " + node1 + " " +node2);
     }
 
     /**
-    *This function return the NodeConnector where a Host is attached
-    *@param srcIP The inetAddress
-    *@return NodeConnector The NodeConnector where the InetAddress is attached
+    *Function that is called when is necessary update the statistics.
     */
 
-    private NodeConnector findHost(InetAddress srcIP){
+    private void updateEdgeStatistics(){
 
-      Set<NodeConnector> connectors = this.topologyManager.getNodeConnectorWithHost();
-
-      for (Iterator<NodeConnector> it = connectors.iterator(); it.hasNext(); ) {
-         NodeConnector temp = it.next();
-         List<Host> hosts= this.topologyManager.getHostsAttachedToNodeConnector(temp);
-
-         for(Iterator<Host> ith = hosts.iterator(); ith.hasNext();){
-
-           Host temp2 = ith.next();
-           if(temp2.getNetworkAddress().equals(srcIP)){
-             return temp;
-           }
-
-         }
-
+      this.edgeStatistics.clear();
+      Set<Node> tempNodes = this.nodeEdges.keySet();
+      for(Iterator<Node> it = tempNodes.iterator(); it.hasNext();){
+        Node tempNode = it.next();
+        Set<Edge> tempEdges = this.nodeEdges.get(tempNode);
+          for(Iterator<Edge> it2 = tempEdges.iterator(); it2.hasNext();){
+            Edge tempEdge = it2.next();
+            putEdgeStatistics(tempEdge);
+          }
       }
-      return null;
 
     }
 
     /**
-    *This function return true if the NodeConnector has some Host attached
-    *@param connector The NodeConnector
-    *@return true if yes or false if not
+    *Function that is called when is necessary update the current Topology store
     */
 
-    private boolean hasHostConnected(NodeConnector connector){
+    private void updateTopology(){
 
-      if(topologyManager.getHostsAttachedToNodeConnector(connector) != null){
-        return true;
+      Map<Node, Set<Edge>> edges = this.topologyManager.getNodeEdges();
+      log.trace("The map is: " + edges); //Se coloca aquí para poder visualizar
+      if(nodeEdges.equals(null) || !nodeEdges.equals(edges)){
+        this.nodeEdges = edges;
+        buildEdgeMatrix(edges);
+        log.trace("The new map is " + this.nodeEdges);
+        this.firstPacket = true;
       }
-      else{
-        return false;
-      }
-
+      updateEdgeStatistics();
     }
 
 
