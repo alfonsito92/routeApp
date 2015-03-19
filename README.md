@@ -11,14 +11,18 @@ https://github.com/lbchen/ODL/tree/master/opendaylight/routing/dijkstra_implemen
 I pretend to use the differents NodeConnector statistics combine with link properties to
 build a weight Matrix and then apply the Dijkstra Algorithm to build the best path.
 
-***********************PROBLEMS
-Problem 1. The properties of the link are empty. This problem cause a lot of variations
+PROBLEMS
+Problem 1. 
+The properties of the link are empty. This problem cause a lot of variations
 in the source Code because now It's impossible to know the bandwith or the latency in the
 edges. The temporaly solution is about build a latencyMap through the flood packet and use
 this latency to build the weightMatrix.
 
-*************************THANKS
+THANKS
 Thanks to SDNHubTutorials, SDNtutorials and Frank dürr
+
 http://sdnhub.org/tutorials/opendaylight/
+
 http://sdnhub.org/tutorials/opendaylight/
+
 http://www.frank-durr.de/
