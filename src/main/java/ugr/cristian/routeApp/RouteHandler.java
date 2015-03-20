@@ -615,8 +615,7 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
-    *Function that is called when is necesarry to install     private void compareStatistic(Long m1, Long m2, String compare){
-new flow in a node.
+    *Function that is called when is necesarry to install
     *All the flows will have two timeOut, idle and Hard.
     *@param srcAddr The source IPv4 Address
     *@param srcMAC_B The srcMACAddress in byte format
