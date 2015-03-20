@@ -112,6 +112,8 @@ public class RouteHandler implements IListenDataPacket {
   private final String receiveDropBytes = "Receive Drop Bytes";
   private final String transmitErrorBytes = "Transmit Error Bytes";
   private final String receiveErrorBytes = "Receive Error Bytes";
+  private final String[] statisticsName = {transmitBytes, receiveBytes, transmitDropBytes,
+  receiveDropBytes, transmitErrorBytes, receiveErrorBytes};
 
   /***************************************/
 
@@ -300,6 +302,8 @@ public class RouteHandler implements IListenDataPacket {
               //Send the packet for the selected Port.
               inPkt.setOutgoingNodeConnector(egressConnector);
               this.dataPacketService.transmitDataPacket(inPkt);
+
+              traceLongMatrix(this.weightMatrix);
 
             }
             return PacketResult.CONSUME;
@@ -859,10 +863,8 @@ new flow in a node.
               this.weightMatrix[i][j]=null;
             }
             else{
-
-              this.weightMatrix[i][j] = standardLatencyWeight(this.edgeMatrix[i][j]) +
+              this.weightMatrix[i][j] = 2L*standardLatencyWeight(this.edgeMatrix[i][j]) +
               standardStatisticsMapWeight(this.edgeMatrix[i][j]);
-
             }
           }
         }
@@ -911,13 +913,86 @@ new flow in a node.
     }
 
     /**
+    *Function that is called when we pretend to show in log all the elements of a Matrix
+    *@matrix[][] The matrix
+    */
+
+    private void traceEdgeMatrix(Edge matrix[][]){
+
+      for(int i=0; i<matrix.length; i++){
+        for(int j=0; j<matrix[i].length; j++){
+
+          log.debug(""+matrix[i][j]);
+
+        }
+      }
+
+    }
+
+    /**
+    *Function that is called when we pretend to show in log all the elements of a Matrix
+    *@matrix[][] The matrix
+    */
+
+    private void traceLongMatrix(Long matrix[][]){
+
+      for(int i=0; i<matrix.length; i++){
+        for(int j=0; j<matrix[i].length; j++){
+
+          log.debug("Element "+i+ " "+j+" is: "+matrix[i][j]);
+
+        }
+      }
+
+    }
+
+    /**
     *This function is called when is necessary evaluate the statisticsMap for an edge
     *@param edge The edge
     *@return The int value after the process
     */
 
     private Long standardStatisticsMapWeight(Edge edge){
-      return 0L;
+      Long weight = 0L;
+      Long temp1 = 0L;
+      Long temp2 = 0L;
+
+      ArrayList<Long> tempArray = new ArrayList<Long>();
+
+      Map<String, ArrayList> tempStatistics = this.edgeStatistics.get(edge);
+      for(int i=0; i<statisticsName.length; i++){
+        tempArray = tempStatistics.get(statisticsName[i]);
+
+        if(tempArray == null){
+
+          tempArray=new ArrayList<Long>();
+          tempArray.add(10L);
+          tempArray.add(10L);
+
+        }
+
+        if(tempArray.get(0)!=0 && tempArray.get(1) !=0 ){
+          Long tempMedium = (tempArray.get(0) + tempArray.get(1) )/ 2;
+
+          Long tempMax = maxStatistics.get(statisticsName[i]);
+
+          if(tempMax == null){
+            tempMax = tempMedium;
+          }
+
+
+          if(tempMax/tempMedium > 9){
+            weight += 1L;
+          }
+          else{
+            weight += 10L - tempMax/tempMedium;
+          }
+        }
+        else{
+          weight += 1L;
+        }
+      }
+      return weight;
     }
 
     /**
@@ -983,6 +1058,5 @@ new flow in a node.
       updateEdgeStatistics();
       standardBuildWeightMatrix();
     }
-
 
 }
