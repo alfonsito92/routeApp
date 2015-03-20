@@ -96,13 +96,13 @@ public class RouteHandler implements IListenDataPacket {
 
   private boolean firstPacket=true;
 
-  private Long weightMatrix[][];
+  private Long costMatrix[][];
 
   private ConcurrentMap<Edge, Map<String, ArrayList>> edgeStatistics = new ConcurrentHashMap<Edge, Map<String, ArrayList>>();
   private Map<String, Long> maxStatistics = new HashMap<String, Long>();
 
   private short idleTimeOut = 30;
-  private short hardTimeOut = 60;
+  private short hardTimeOut = 30;
 
   /*********Statistics Constants**********/
 
@@ -118,7 +118,7 @@ public class RouteHandler implements IListenDataPacket {
   /***************************************/
 
   /*************************************/
-  private final Long defaultWeight = 5L; //If we don't have any latency measure
+  private final Long defaultCost = 5L; //If we don't have any latency measure
   /*************************************/
 
   static private InetAddress intToInetAddress(int i) {
@@ -303,7 +303,7 @@ public class RouteHandler implements IListenDataPacket {
               inPkt.setOutgoingNodeConnector(egressConnector);
               this.dataPacketService.transmitDataPacket(inPkt);
 
-              traceLongMatrix(this.weightMatrix);
+              traceLongMatrix(this.costMatrix);
 
             }
             return PacketResult.CONSUME;
@@ -842,29 +842,29 @@ new flow in a node.
     }
 
     /**
-    *This function try to assing a weight for each Edge attending the latency and
+    *This function try to assing a cost for each Edge attending the latency and
     *medium latency and other aspects like statistics
     */
 
-    private void standardBuildWeightMatrix(){
+    private void standardBuildCostMatrix(){
       int l = this.nodeEdges.size();
       int h = this.nodeEdges.size();
-      this.weightMatrix = new Long[l][h];
+      this.costMatrix = new Long[l][h];
 
       for(int i=0; i<l; i++){
 
         for(int j=0; j<h; j++){
 
           if(i==j){
-            this.weightMatrix[i][j]=0L;
+            this.costMatrix[i][j]=0L;
           }
           else{
             if(this.edgeMatrix[i][j]==null){
-              this.weightMatrix[i][j]=null;
+              this.costMatrix[i][j]=null;
             }
             else{
-              this.weightMatrix[i][j] = 2L*standardLatencyWeight(this.edgeMatrix[i][j]) +
-              standardStatisticsMapWeight(this.edgeMatrix[i][j]);
+              this.costMatrix[i][j] = 2L*standardLatencyCost(this.edgeMatrix[i][j]) +
+              standardStatisticsMapCost(this.edgeMatrix[i][j]);
             }
           }
         }
@@ -877,39 +877,88 @@ new flow in a node.
     *@return The int value after the process
     */
 
-    private Long standardLatencyWeight(Edge edge){
+    private Long standardLatencyCost(Edge edge){
       int i = getNodeConnectorIndex(edge.getHeadNodeConnector());
       int j = getNodeConnectorIndex(edge.getTailNodeConnector());
 
       Long ret1 = 0L;
       Long ret2 = 0L;
 
-      Long weight;
+      Long cost;
       if(latencyMatrix!=null){
         Long temp = this.latencyMatrix[i][j];
         Long temp2 = this.mediumLatencyMatrix[i][j];
 
         if(temp == null){
-          ret1=defaultWeight;
+          ret1=defaultCost;
         }
         else{
           ret1 = temp/minLatency;
         }
 
         if(temp2 == null){
-          ret2=defaultWeight;
+          ret2=defaultCost;
         }
         else{
           ret2=temp2/minLatency;
         }
       }
       else{
-        ret1=defaultWeight;
-        ret2=defaultWeight;
+        ret1=defaultCost;
+        ret2=defaultCost;
       }
 
-      weight = ret1 + ret2;
-      return weight;
+      cost = ret1 + ret2;
+      return cost;
+    }
+
+    /**
+    *This function is called when is necessary evaluate the statisticsMap for an edge
+    *@param edge The edge
+    *@return The int value after the process
+    */
+
+    private Long standardStatisticsMapCost(Edge edge){
+      Long cost = 0L;
+      Long temp1 = 0L;
+      Long temp2 = 0L;
+
+      ArrayList<Long> tempArray = new ArrayList<Long>();
+
+      Map<String, ArrayList> tempStatistics = this.edgeStatistics.get(edge);
+      for(int i=0; i<statisticsName.length; i++){
+        tempArray = tempStatistics.get(statisticsName[i]);
+
+        if(tempArray == null){
+
+          tempArray=new ArrayList<Long>();
+          tempArray.add(10L);
+          tempArray.add(10L);
+
+        }
+
+        if(tempArray.get(0)!=0 && tempArray.get(1) !=0 ){
+          Long tempMedium = (tempArray.get(0) + tempArray.get(1) )/ 2;
+
+          Long tempMax = maxStatistics.get(statisticsName[i]);
+
+          if(tempMax == null){
+            tempMax = tempMedium;
+          }
+
+
+          if(tempMax/tempMedium > 9){
+            cost += 1L;
+          }
+          else{
+            cost += 10L - tempMax/tempMedium;
+          }
+        }
+        else{
+          cost += 1L;
+        }
+      }
+      return cost;
     }
 
     /**
@@ -944,55 +993,6 @@ new flow in a node.
         }
       }
 
-    }
-
-    /**
-    *This function is called when is necessary evaluate the statisticsMap for an edge
-    *@param edge The edge
-    *@return The int value after the process
-    */
-
-    private Long standardStatisticsMapWeight(Edge edge){
-      Long weight = 0L;
-      Long temp1 = 0L;
-      Long temp2 = 0L;
-
-      ArrayList<Long> tempArray = new ArrayList<Long>();
-
-      Map<String, ArrayList> tempStatistics = this.edgeStatistics.get(edge);
-      for(int i=0; i<statisticsName.length; i++){
-        tempArray = tempStatistics.get(statisticsName[i]);
-
-        if(tempArray == null){
-
-          tempArray=new ArrayList<Long>();
-          tempArray.add(10L);
-          tempArray.add(10L);
-
-        }
-
-        if(tempArray.get(0)!=0 && tempArray.get(1) !=0 ){
-          Long tempMedium = (tempArray.get(0) + tempArray.get(1) )/ 2;
-
-          Long tempMax = maxStatistics.get(statisticsName[i]);
-
-          if(tempMax == null){
-            tempMax = tempMedium;
-          }
-
-
-          if(tempMax/tempMedium > 9){
-            weight += 1L;
-          }
-          else{
-            weight += 10L - tempMax/tempMedium;
-          }
-        }
-        else{
-          weight += 1L;
-        }
-      }
-      return weight;
     }
 
     /**
@@ -1056,7 +1056,7 @@ new flow in a node.
         this.firstPacket = true;
       }
       updateEdgeStatistics();
-      standardBuildWeightMatrix();
+      standardBuildCostMatrix();
     }
 
 }
