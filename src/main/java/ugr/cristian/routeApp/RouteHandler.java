@@ -96,13 +96,15 @@ public class RouteHandler implements IListenDataPacket {
 
   private boolean firstPacket=true;
 
-  private Long costMatrix[][];
+  private Long standardCostMatrix[][];
 
   private ConcurrentMap<Edge, Map<String, ArrayList>> edgeStatistics = new ConcurrentHashMap<Edge, Map<String, ArrayList>>();
   private Map<String, Long> maxStatistics = new HashMap<String, Long>();
 
+  private ConcurrentMap<Node, Map<Node, Path>> pathMap = new ConcurrentHashMap<Node, Map<Node, Path>>();
+
   private short idleTimeOut = 30;
-  private short hardTimeOut = 30;
+  private short hardTimeOut = 60;
 
   /*********Statistics Constants**********/
 
@@ -303,7 +305,7 @@ public class RouteHandler implements IListenDataPacket {
               inPkt.setOutgoingNodeConnector(egressConnector);
               this.dataPacketService.transmitDataPacket(inPkt);
 
-              traceLongMatrix(this.costMatrix);
+              traceLongMatrix(this.standardCostMatrix);
 
             }
             return PacketResult.CONSUME;
@@ -338,6 +340,36 @@ public class RouteHandler implements IListenDataPacket {
 
         }
 
+      }
+    }
+
+    /**
+    *This function try to assing a cost for each Edge attending the latency and
+    *medium latency and other aspects like statistics
+    */
+
+    private void buildStandardCostMatrix(){
+      int l = this.nodeEdges.size();
+      int h = this.nodeEdges.size();
+      this.standardCostMatrix = new Long[l][h];
+
+      for(int i=0; i<l; i++){
+
+        for(int j=0; j<h; j++){
+
+          if(i==j){
+            this.standardCostMatrix[i][j]=0L;
+          }
+          else{
+            if(this.edgeMatrix[i][j]==null){
+              this.standardCostMatrix[i][j]=null;
+            }
+            else{
+              this.standardCostMatrix[i][j] = 2L*standardLatencyCost(this.edgeMatrix[i][j]) +
+              standardStatisticsMapCost(this.edgeMatrix[i][j]);
+            }
+          }
+        }
       }
     }
 
@@ -841,33 +873,41 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
-    *This function try to assing a cost for each Edge attending the latency and
-    *medium latency and other aspects like statistics
+    *This function build for each node the best path to each other node.
     */
 
-    private void standardBuildCostMatrix(){
-      int l = this.nodeEdges.size();
-      int h = this.nodeEdges.size();
-      this.costMatrix = new Long[l][h];
+    private void routingAlgorithm(){
 
-      for(int i=0; i<l; i++){
+      Set<Node> nodes = nodeEdges.keySet();
 
-        for(int j=0; j<h; j++){
+      for(Iterator<Node> it = nodes.iterator(); it.hasNext();){
 
-          if(i==j){
-            this.costMatrix[i][j]=0L;
+        Node srcNode = it.next();
+
+        for(Iterator<Node> it2 = nodes.iterator(); it2.hasNext();){
+          Node dstNode = it2.next();
+
+          if(!srcNode.equals(dstNode)){
+            shortesPath(srcNode, dstNode);
           }
-          else{
-            if(this.edgeMatrix[i][j]==null){
-              this.costMatrix[i][j]=null;
-            }
-            else{
-              this.costMatrix[i][j] = 2L*standardLatencyCost(this.edgeMatrix[i][j]) +
-              standardStatisticsMapCost(this.edgeMatrix[i][j]);
-            }
-          }
+
         }
+
       }
+
+    }
+
+    /**
+    *This function is called when is necessary the less cost way between two nodes
+    *@param src The source Node
+    *@param dst The destination node
+    */
+
+    private void shortesPath(Node src, Node dst){
+
+      int origen = Integer.parseInt(src.getID().toString());
+      int destino = Integer.parseInt(dst.getID().toString());
+
     }
 
     /**
@@ -970,7 +1010,7 @@ public class RouteHandler implements IListenDataPacket {
       for(int i=0; i<matrix.length; i++){
         for(int j=0; j<matrix[i].length; j++){
 
-          log.debug(""+matrix[i][j]);
+          log.trace(""+matrix[i][j]);
 
         }
       }
@@ -987,7 +1027,7 @@ public class RouteHandler implements IListenDataPacket {
       for(int i=0; i<matrix.length; i++){
         for(int j=0; j<matrix[i].length; j++){
 
-          log.debug("Element "+i+ " "+j+" is: "+matrix[i][j]);
+          log.trace("Element "+i+ " "+j+" is: "+matrix[i][j]);
 
         }
       }
@@ -1055,7 +1095,7 @@ public class RouteHandler implements IListenDataPacket {
         this.firstPacket = true;
       }
       updateEdgeStatistics();
-      standardBuildCostMatrix();
+      buildStandardCostMatrix();
     }
 
 }
