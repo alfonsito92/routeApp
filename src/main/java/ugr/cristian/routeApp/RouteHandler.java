@@ -44,9 +44,12 @@ import org.opendaylight.controller.sal.action.SetDlSrc;
 import org.opendaylight.controller.sal.action.SetNwDst;
 import org.opendaylight.controller.sal.action.SetNwSrc;
 import org.opendaylight.controller.sal.core.ConstructionException;
+import org.opendaylight.controller.sal.core.Bandwidth;
 import org.opendaylight.controller.sal.core.Node;
 import org.opendaylight.controller.sal.core.Edge;
 import org.opendaylight.controller.sal.core.Host;
+import org.opendaylight.controller.sal.core.Latency;
+import org.opendaylight.controller.sal.core.Property;
 import org.opendaylight.controller.sal.core.Path;
 import org.opendaylight.controller.sal.core.NodeConnector;
 import org.opendaylight.controller.sal.flowprogrammer.Flow;
@@ -68,6 +71,13 @@ import org.opendaylight.controller.sal.utils.Status;
 import org.opendaylight.controller.switchmanager.ISwitchManager;
 import org.opendaylight.controller.topologymanager.ITopologyManager;
 import org.opendaylight.controller.statisticsmanager.IStatisticsManager;
+
+import edu.uci.ics.jung.algorithms.shortestpath.DijkstraShortestPath;
+import edu.uci.ics.jung.graph.Graph;
+import edu.uci.ics.jung.graph.SparseMultigraph;
+import edu.uci.ics.jung.graph.util.EdgeType;
+
+import org.apache.commons.collections15.Transformer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -102,6 +112,12 @@ public class RouteHandler implements IListenDataPacket {
   private Map<String, Long> maxStatistics = new HashMap<String, Long>();
 
   private ConcurrentMap<Node, Map<Node, Path>> pathMap = new ConcurrentHashMap<Node, Map<Node, Path>>();
+
+  private Map<Edge, Long> edgeCostMap = new HashMap<Edge, Long>();
+
+  private Graph<Node, Edge> g = new SparseMultigraph();
+
+  private DijkstraShortestPath stp;
 
   private short idleTimeOut = 30;
   private short hardTimeOut = 60;
@@ -293,7 +309,6 @@ public class RouteHandler implements IListenDataPacket {
               else{
                 log.trace("Error trying to install the flow");
               }
-
               if(!hasHostConnected(egressConnector)){
                 Edge downEdge = getDownEdge(node, egressConnector);
                 if(downEdge!= null){
@@ -304,8 +319,6 @@ public class RouteHandler implements IListenDataPacket {
               //Send the packet for the selected Port.
               inPkt.setOutgoingNodeConnector(egressConnector);
               this.dataPacketService.transmitDataPacket(inPkt);
-
-              traceLongMatrix(this.standardCostMatrix);
 
             }
             return PacketResult.CONSUME;
@@ -352,6 +365,7 @@ public class RouteHandler implements IListenDataPacket {
       int l = this.nodeEdges.size();
       int h = this.nodeEdges.size();
       this.standardCostMatrix = new Long[l][h];
+      this.edgeCostMap.clear();
 
       for(int i=0; i<l; i++){
 
@@ -369,6 +383,7 @@ public class RouteHandler implements IListenDataPacket {
               standardStatisticsMapCost(this.edgeMatrix[i][j]);
             }
           }
+          edgeCostMap.put(this.edgeMatrix[i][j], this.standardCostMatrix[i][j]);
         }
       }
     }
@@ -470,6 +485,25 @@ public class RouteHandler implements IListenDataPacket {
           }
       }
 
+    }
+
+    /**
+    *This function is called when is required to build a topology Graph
+    */
+
+    private void createGraph(){
+      g = new SparseMultigraph();
+
+      for(int i=0; i<edgeMatrix.length; i++){
+        for(int j=0; j<edgeMatrix[i].length; j++){
+
+          if(edgeMatrix[i][j]!=null){
+            g.addEdge(edgeMatrix[i][j], edgeMatrix[i][j].getHeadNodeConnector().getNode(),
+            edgeMatrix[i][j].getTailNodeConnector().getNode());
+          }
+
+        }
+      }
     }
 
     /**
@@ -873,44 +907,6 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
-    *This function build for each node the best path to each other node.
-    */
-
-    private void routingAlgorithm(){
-
-      Set<Node> nodes = nodeEdges.keySet();
-
-      for(Iterator<Node> it = nodes.iterator(); it.hasNext();){
-
-        Node srcNode = it.next();
-
-        for(Iterator<Node> it2 = nodes.iterator(); it2.hasNext();){
-          Node dstNode = it2.next();
-
-          if(!srcNode.equals(dstNode)){
-            shortesPath(srcNode, dstNode);
-          }
-
-        }
-
-      }
-
-    }
-
-    /**
-    *This function is called when is necessary the less cost way between two nodes
-    *@param src The source Node
-    *@param dst The destination node
-    */
-
-    private void shortesPath(Node src, Node dst){
-
-      int origen = Integer.parseInt(src.getID().toString());
-      int destino = Integer.parseInt(dst.getID().toString());
-
-    }
-
-    /**
     *This function is called when is necessary evaluate the latencyMatrix for an edge
     *@param edge The edge
     *@return The int value after the process
@@ -1096,6 +1092,8 @@ public class RouteHandler implements IListenDataPacket {
       }
       updateEdgeStatistics();
       buildStandardCostMatrix();
+      createGraph();
+      stp=new DijkstraShortestPath(g);
     }
 
 }
