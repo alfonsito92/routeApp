@@ -1,5 +1,5 @@
 Manifest-Version: 1.0
-Bnd-LastModified: 1427303401752
+Bnd-LastModified: 1427316266286
 Build-Jdk: 1.7.0_75
 Built-By: cristian
 Bundle-Activator: ugr.cristian.routeApp.Activator
@@ -15,8 +15,8 @@ Export-Package: ugr.cristian.routeApp;uses:="org.opendaylight.controller
  opendaylight.controller.sal.packet,org.slf4j,org.apache.commons.collect
  ions15,org.opendaylight.controller.sal.reader,org.opendaylight.controll
  er.sal.utils,org.opendaylight.controller.sal.action,edu.uci.ics.jung.al
- gorithms.shortestpath,edu.uci.ics.jung.graph,org.opendaylight.controlle
- r.sal.match";version="1.0.0.SNAPSHOT"
+ gorithms.shortestpath,org.opendaylight.controller.sal.match,edu.uci.ics
+ .jung.graph";version="1.0.0.SNAPSHOT"
 Import-Package: edu.uci.ics.jung.algorithms.shortestpath;version="[2.0,3
  )",edu.uci.ics.jung.graph;version="[2.0,3)",org.apache.commons.collecti
  ons15;version="[2.0,3)",org.apache.felix.dm;version="[3.0,4)",org.opend

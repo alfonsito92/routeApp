@@ -322,8 +322,15 @@ public class RouteHandler implements IListenDataPacket {
               inPkt.setOutgoingNodeConnector(egressConnector);
               this.dataPacketService.transmitDataPacket(inPkt);
 
+              /********************************************Pruebas**********************************
               log.debug("shortes Path "+stp.getPath(edgeMatrix[0][1].getHeadNodeConnector().getNode(),
               edgeMatrix[1][2].getTailNodeConnector().getNode()));
+
+              log.debug("Distancia "+stp.getDistance(edgeMatrix[0][1].getHeadNodeConnector().getNode(),
+              edgeMatrix[1][2].getTailNodeConnector().getNode()));
+
+              traceLongMatrix(this.standardCostMatrix);
+              /******************************************Debug***************************************/
 
             }
             return PacketResult.CONSUME;
@@ -1044,7 +1051,7 @@ public class RouteHandler implements IListenDataPacket {
       for(int i=0; i<matrix.length; i++){
         for(int j=0; j<matrix[i].length; j++){
 
-          log.trace("Element "+i+ " "+j+" is: "+matrix[i][j]);
+          log.debug("Element "+i+ " "+j+" is: "+matrix[i][j]);
 
         }
       }
