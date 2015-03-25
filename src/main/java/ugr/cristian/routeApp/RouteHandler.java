@@ -115,9 +115,11 @@ public class RouteHandler implements IListenDataPacket {
 
   private Map<Edge, Long> edgeCostMap = new HashMap<Edge, Long>();
 
+  private Transformer<Edge, ? extends Number> costTransformer = null;
+
   private Graph<Node, Edge> g = new SparseMultigraph();
 
-  private DijkstraShortestPath stp;
+  private DijkstraShortestPath<Node, Edge> stp;
 
   private short idleTimeOut = 30;
   private short hardTimeOut = 60;
@@ -320,6 +322,9 @@ public class RouteHandler implements IListenDataPacket {
               inPkt.setOutgoingNodeConnector(egressConnector);
               this.dataPacketService.transmitDataPacket(inPkt);
 
+              log.debug("shortes Path "+stp.getPath(edgeMatrix[0][1].getHeadNodeConnector().getNode(),
+              edgeMatrix[1][2].getTailNodeConnector().getNode()));
+
             }
             return PacketResult.CONSUME;
           }
@@ -386,6 +391,22 @@ public class RouteHandler implements IListenDataPacket {
           edgeCostMap.put(this.edgeMatrix[i][j], this.standardCostMatrix[i][j]);
         }
       }
+      buildTransformerMap(this.edgeCostMap);
+    }
+
+    /**
+    *Function that is called when is necessary to build the transformer for Dijkstra
+    */
+
+    private void buildTransformerMap(final Map<Edge, Long> edgeCostMap2){
+
+      costTransformer = new Transformer<Edge, Long>(){
+        public Long transform(Edge e){
+
+          return edgeCostMap2.get(e);
+        }
+      };
+
     }
 
     /**
@@ -420,7 +441,7 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
-    *Function that is called when is neccessary check if a IPAddress are in memory or not
+    *Function that is called when is necessary check if a IPAddress are in memory or not
     *@param node The node where we have to check
     *@param addr The IPAddress which is necessary to check
     *@return The boolean which shows if the Address are or not.
@@ -491,7 +512,7 @@ public class RouteHandler implements IListenDataPacket {
     *This function is called when is required to build a topology Graph
     */
 
-    private void createGraph(){
+    private void createTopologyGraph(){
       g = new SparseMultigraph();
 
       for(int i=0; i<edgeMatrix.length; i++){
@@ -1083,17 +1104,18 @@ public class RouteHandler implements IListenDataPacket {
     private void updateTopology(){
 
       Map<Node, Set<Edge>> edges = this.topologyManager.getNodeEdges();
-      log.trace("The map is: " + edges); //Se coloca aquí para poder visualizar
+
       if(nodeEdges.equals(null) || !nodeEdges.equals(edges)){
         this.nodeEdges = edges;
         buildEdgeMatrix(edges);
         log.trace("The new map is " + this.nodeEdges);
         this.firstPacket = true;
+        createTopologyGraph();
       }
+
       updateEdgeStatistics();
       buildStandardCostMatrix();
-      createGraph();
-      stp=new DijkstraShortestPath(g);
+      stp = new DijkstraShortestPath<Node, Edge>(g, costTransformer);
     }
 
 }

@@ -1,5 +1,5 @@
 Manifest-Version: 1.0
-Bnd-LastModified: 1427286840237
+Bnd-LastModified: 1427303401752
 Build-Jdk: 1.7.0_75
 Built-By: cristian
 Bundle-Activator: ugr.cristian.routeApp.Activator
@@ -12,20 +12,21 @@ Export-Package: ugr.cristian.routeApp;uses:="org.opendaylight.controller
  .sal.flowprogrammer,org.opendaylight.controller.sal.core,org.opendaylig
  ht.controller.statisticsmanager,org.opendaylight.controller.topologyman
  ager,org.apache.felix.dm,org.opendaylight.controller.switchmanager,org.
- opendaylight.controller.sal.packet,org.slf4j,org.opendaylight.controlle
- r.sal.reader,org.opendaylight.controller.sal.utils,org.opendaylight.con
- troller.sal.action,edu.uci.ics.jung.algorithms.shortestpath,org.openday
- light.controller.sal.match,edu.uci.ics.jung.graph";version="1.0.0.SNAPS
- HOT"
+ opendaylight.controller.sal.packet,org.slf4j,org.apache.commons.collect
+ ions15,org.opendaylight.controller.sal.reader,org.opendaylight.controll
+ er.sal.utils,org.opendaylight.controller.sal.action,edu.uci.ics.jung.al
+ gorithms.shortestpath,edu.uci.ics.jung.graph,org.opendaylight.controlle
+ r.sal.match";version="1.0.0.SNAPSHOT"
 Import-Package: edu.uci.ics.jung.algorithms.shortestpath;version="[2.0,3
- )",edu.uci.ics.jung.graph;version="[2.0,3)",org.apache.felix.dm;version
- ="[3.0,4)",org.opendaylight.controller.sal.action;version="[0.7,1)",org
- .opendaylight.controller.sal.core;version="[0.7,1)",org.opendaylight.co
- ntroller.sal.flowprogrammer;version="[0.7,1)",org.opendaylight.controll
- er.sal.match;version="[0.7,1)",org.opendaylight.controller.sal.packet;v
- ersion="[0.7,1)",org.opendaylight.controller.sal.reader;version="[0.7,1
- )",org.opendaylight.controller.sal.utils;version="[0.7,1)",org.opendayl
- ight.controller.statisticsmanager;version="[0.5,1)",org.opendaylight.co
- ntroller.switchmanager;version="[0.7,1)",org.opendaylight.controller.to
- pologymanager;version="[0.4,1)",org.slf4j;version="[1.7,2)"
+ )",edu.uci.ics.jung.graph;version="[2.0,3)",org.apache.commons.collecti
+ ons15;version="[2.0,3)",org.apache.felix.dm;version="[3.0,4)",org.opend
+ aylight.controller.sal.action;version="[0.7,1)",org.opendaylight.contro
+ ller.sal.core;version="[0.7,1)",org.opendaylight.controller.sal.flowpro
+ grammer;version="[0.7,1)",org.opendaylight.controller.sal.match;version
+ ="[0.7,1)",org.opendaylight.controller.sal.packet;version="[0.7,1)",org
+ .opendaylight.controller.sal.reader;version="[0.7,1)",org.opendaylight.
+ controller.sal.utils;version="[0.7,1)",org.opendaylight.controller.stat
+ isticsmanager;version="[0.5,1)",org.opendaylight.controller.switchmanag
+ er;version="[0.7,1)",org.opendaylight.controller.topologymanager;versio
+ n="[0.4,1)",org.slf4j;version="[1.7,2)"
 Tool: Bnd-1.50.0
