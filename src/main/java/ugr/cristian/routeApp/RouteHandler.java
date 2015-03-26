@@ -475,6 +475,7 @@ public class RouteHandler implements IListenDataPacket {
     *This function is called when is necessary to check if the latencyMatrix is complete or not
     *@return result The boolean which indics if the matrix are complete or not
     */
+    /////////////////
 
     private boolean checkLatencyMatrix(){
 
