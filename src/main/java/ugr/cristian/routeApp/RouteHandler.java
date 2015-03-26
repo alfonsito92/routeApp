@@ -100,6 +100,7 @@ public class RouteHandler implements IListenDataPacket {
   private Long latencyMatrix[][];
   private Long minLatency;
   private Long mediumLatencyMatrix[][];
+  private Long minMediumLatency;
 
   private Map<Edge, Set<Packet>> edgePackets = new HashMap<Edge, Set<Packet>>();
   private ConcurrentMap<Map<Edge, Packet>, Long> packetTime = new ConcurrentHashMap<Map<Edge, Packet>, Long>();
@@ -120,6 +121,9 @@ public class RouteHandler implements IListenDataPacket {
   private Graph<Node, Edge> g = new SparseMultigraph();
 
   private DijkstraShortestPath<Node, Edge> stp;
+
+  private Map<Edge, ArrayList> edgeMediumMapTime = new HashMap<Edge, ArrayList>();
+
 
   private short idleTimeOut = 30;
   private short hardTimeOut = 60;
@@ -322,7 +326,7 @@ public class RouteHandler implements IListenDataPacket {
               inPkt.setOutgoingNodeConnector(egressConnector);
               this.dataPacketService.transmitDataPacket(inPkt);
 
-              /********************************************Pruebas**********************************
+              /********************************************Debug**********************************
               log.debug("shortes Path "+stp.getPath(edgeMatrix[0][1].getHeadNodeConnector().getNode(),
               edgeMatrix[1][2].getTailNodeConnector().getNode()));
 
@@ -330,8 +334,11 @@ public class RouteHandler implements IListenDataPacket {
               edgeMatrix[1][2].getTailNodeConnector().getNode()));
 
               traceLongMatrix(this.standardCostMatrix);
+              */
+              log.debug("" + this.latencyMatrix[0][1]);
+              log.debug("" + this.mediumLatencyMatrix[0][1]);
+              log.debug("" + this.standardCostMatrix[0][1]);
               /******************************************Debug***************************************/
-
             }
             return PacketResult.CONSUME;
           }
@@ -693,6 +700,25 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
+    *This function initialize the map edgeMediumTime
+    */
+
+    private void initializeEdgeMediumTime(){
+
+      Set<Edge> edges = this.topologyManager.getEdges().keySet();
+
+      ArrayList<Long> temp;
+
+      for(Iterator<Edge> it = edges.iterator(); it.hasNext();){
+        temp= new ArrayList();
+        Edge tempEdge = it.next();
+
+        edgeMediumMapTime.put(tempEdge, temp);
+      }
+
+    }
+
+    /**
     *Function that is called when is necessary to put a Association Node,IP and NodeConnector
     *in ourt IPTable.
     *@param node The node where we have to create the association.
@@ -963,7 +989,7 @@ public class RouteHandler implements IListenDataPacket {
           ret2=defaultCost;
         }
         else{
-          ret2=temp2/minLatency;
+          ret2=temp2/minMediumLatency;
         }
       }
       else{
@@ -971,7 +997,7 @@ public class RouteHandler implements IListenDataPacket {
         ret2=defaultCost;
       }
 
-      cost = ret1 + ret2;
+      cost = ret1/2 + ret2;
       return cost;
     }
 
@@ -1025,6 +1051,24 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
+    *This function is called when is necessary to sum all the elements of a Array
+    *@param array The array which will be sum
+    *@return result The complete sum of the array
+    */
+
+    private Long sumLongArray(ArrayList<Long> array){
+      Long result = 0L;
+
+      for(int i=0; i<array.size(); i++){
+
+        result += array.get(i);
+
+      }
+
+      return result;
+    }
+
+    /**
     *Function that is called when we pretend to show in log all the elements of a Matrix
     *@matrix[][] The matrix
     */
@@ -1068,18 +1112,37 @@ public class RouteHandler implements IListenDataPacket {
       if(firstPacket){
         this.latencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
         this.mediumLatencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
+        initializeEdgeMediumTime();
         firstPacket=false;
       }
 
       int node1 = getNodeConnectorIndex(edge.getHeadNodeConnector());
       int node2 = getNodeConnectorIndex(edge.getTailNodeConnector());
 
-      Long temp = this.mediumLatencyMatrix[node1][node2];
-      if(temp == null){
-        this.mediumLatencyMatrix[node1][node2]=t;
+      ArrayList<Long> temp = this.edgeMediumMapTime.get(edge);
+
+      if(temp.size()==10){
+        temp.remove(0);
+        temp.add(t);
       }
       else{
-        this.mediumLatencyMatrix[node1][node2] = (t + temp)/2;
+        temp.add(t);
+      }
+
+      this.edgeMediumMapTime.remove(edge);
+      this.edgeMediumMapTime.put(edge, temp);
+
+      Long sum = sumLongArray(temp);
+
+      this.mediumLatencyMatrix[node1][node2] = sum / temp.size();
+
+      if(minMediumLatency == null){
+        this.minMediumLatency = sum / temp.size();
+      }
+      else{
+        if(this.minMediumLatency > (sum/ temp.size())){
+          this.minMediumLatency = sum / temp.size();
+        }
       }
 
       this.latencyMatrix[node1][node2] = t;
