@@ -38,6 +38,7 @@ import java.util.Set;
 import java.util.HashSet;
 
 import org.opendaylight.controller.sal.action.Action;
+import org.opendaylight.controller.sal.action.Controller;
 import org.opendaylight.controller.sal.action.Output;
 import org.opendaylight.controller.sal.action.SetDlDst;
 import org.opendaylight.controller.sal.action.SetDlSrc;
@@ -125,8 +126,8 @@ public class RouteHandler implements IListenDataPacket {
   private Map<Edge, ArrayList> edgeMediumMapTime = new HashMap<Edge, ArrayList>();
 
 
-  private short idleTimeOut = 30;
-  private short hardTimeOut = 60;
+  private short idleTimeOut = 20;
+  private short hardTimeOut = 30;
 
   /*********Statistics Constants**********/
 
@@ -327,6 +328,7 @@ public class RouteHandler implements IListenDataPacket {
               this.dataPacketService.transmitDataPacket(inPkt);
 
               /********************************************Debug**********************************
+              */
               log.debug("shortes Path "+stp.getPath(edgeMatrix[0][1].getHeadNodeConnector().getNode(),
               edgeMatrix[1][2].getTailNodeConnector().getNode()));
 
@@ -334,7 +336,7 @@ public class RouteHandler implements IListenDataPacket {
               edgeMatrix[1][2].getTailNodeConnector().getNode()));
 
               traceLongMatrix(this.standardCostMatrix);
-              */
+              /*
               log.debug("" + this.latencyMatrix[0][1]);
               log.debug("" + this.mediumLatencyMatrix[0][1]);
               log.debug("" + this.standardCostMatrix[0][1]);
@@ -398,7 +400,7 @@ public class RouteHandler implements IListenDataPacket {
               this.standardCostMatrix[i][j]=null;
             }
             else{
-              this.standardCostMatrix[i][j] = 2L*standardLatencyCost(this.edgeMatrix[i][j]) +
+              this.standardCostMatrix[i][j] = 2*standardLatencyCost(this.edgeMatrix[i][j]) +
               standardStatisticsMapCost(this.edgeMatrix[i][j]);
             }
           }
@@ -467,6 +469,30 @@ public class RouteHandler implements IListenDataPacket {
       temp.put(node, addr);
       return this.tableIP.containsKey(temp);
 
+    }
+
+    /**
+    *This function is called when is necessary to check if the latencyMatrix is complete or not
+    *@return result The boolean which indics if the matrix are complete or not
+    */
+
+    private boolean checkLatencyMatrix(){
+
+      boolean result = true;
+
+      for(int i=0; i<this.edgeMatrix.length; i++){
+        for(int j=0; j<this.edgeMatrix[i].length; j++){
+
+          if(edgeMatrix[i][j] != null){
+            if(latencyMatrix[i][j] == null){
+              result = false;
+            }
+
+          }
+
+        }
+      }
+      return result;
     }
 
     /**
@@ -1047,7 +1073,7 @@ public class RouteHandler implements IListenDataPacket {
           cost += 1L;
         }
       }
-      return cost;
+      return cost/2;
     }
 
     /**
