@@ -125,6 +125,11 @@ public class RouteHandler implements IListenDataPacket {
 
   private Map<Edge, ArrayList> edgeMediumMapTime = new HashMap<Edge, ArrayList>();
 
+  private ConcurrentMap<Map<Node, InetAddress>, Map<NodeConnector, Integer>> addressPortMap =
+  new ConcurrentHashMap<Map<Node, InetAddress>, Map<NodeConnector, Integer>>();
+
+  private ConcurrentMap<Map<Node, Node>, Map<Integer, List>> pathPortMap = new
+  ConcurrentHashMap<Map<Node, Node>, Map<Integer, List>>();
 
   private short idleTimeOut = 20;
   private short hardTimeOut = 30;
@@ -262,6 +267,7 @@ public class RouteHandler implements IListenDataPacket {
     public PacketResult receiveDataPacket(RawPacket inPkt) {
       //Once a packet come the Topology has to be updated
       updateTopology();
+
       //First I get the incoming Connector where the packet came.
       NodeConnector ingressConnector = inPkt.getIncomingNodeConnector();
       Packet pkt = dataPacketService.decodeDataPacket(inPkt);
@@ -295,53 +301,75 @@ public class RouteHandler implements IListenDataPacket {
 
           if(l4Datagram instanceof ICMP){
 
-
-            //First Is necessary to check if the IP are in memory.
-            if(!checkAddress(node, srcAddr)){
-              learnIPAddress(node, srcAddr, ingressConnector);
-            }
-
-
-            NodeConnector egressConnector = getIPNodeConnector(node, dstAddr);
-
-            if(egressConnector == null){
+            if(!checkLatencyMatrix()){
               floodPacket(inPkt, node, ingressConnector);
             }
             else{
-              if(programFlow( srcAddr, srcMAC_B, dstAddr, dstMAC_B, egressConnector, node) ){
+              if(hasHostConnected(ingressConnector)){
+                learnIPAddress(node, srcAddr, ingressConnector);
+              }
 
-                log.trace("Flow installed on " + node + " in the port " + egressConnector);
+              Node tempSrcNode = findHost(srcAddr).getNode();
+              Node tempDstNode = findHost(dstAddr).getNode();
 
+              List<Edge> tempPath = stp.getPath(tempSrcNode, tempDstNode);
+              List<Edge> definitivePath;
+
+              boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(tempSrcNode);
+              if(!temp){
+                definitivePath = reordenateList(tempPath, tempSrcNode, tempDstNode);
+                log.trace("reordenating");
               }
               else{
-                log.trace("Error trying to install the flow");
+                definitivePath = tempPath;
               }
-              if(!hasHostConnected(egressConnector)){
-                Edge downEdge = getDownEdge(node, egressConnector);
-                if(downEdge!= null){
-                  putPacket(downEdge, pkt);
+              log.trace("definitivePath "+definitivePath);
+
+              NodeConnector egressConnector = getIPNodeConnector(node, dstAddr);
+
+              if(egressConnector==null){
+                floodPacket(inPkt, node, ingressConnector);
+              }
+              else{
+                if(programFlow( srcAddr, srcMAC_B, dstAddr, dstMAC_B, egressConnector, node) ){
+
+                  log.trace("Flow installed on " + node + " in the port " + egressConnector);
+
                 }
+                else{
+                  log.trace("Error trying to install the flow");
+                }
+                if(!hasHostConnected(egressConnector)){
+                  Edge downEdge = getDownEdge(node, egressConnector);
+                  if(downEdge!= null){
+                    putPacket(downEdge, pkt);
+                  }
+                }
+
+                //Send the packet for the selected Port.
+                inPkt.setOutgoingNodeConnector(egressConnector);
+                this.dataPacketService.transmitDataPacket(inPkt);
               }
 
-              //Send the packet for the selected Port.
-              inPkt.setOutgoingNodeConnector(egressConnector);
-              this.dataPacketService.transmitDataPacket(inPkt);
-
-              /********************************************Debug**********************************
-              */
-              log.debug("shortes Path "+stp.getPath(edgeMatrix[0][1].getHeadNodeConnector().getNode(),
-              edgeMatrix[1][2].getTailNodeConnector().getNode()));
-
-              log.debug("Distancia "+stp.getDistance(edgeMatrix[0][1].getHeadNodeConnector().getNode(),
-              edgeMatrix[1][2].getTailNodeConnector().getNode()));
-
-              traceLongMatrix(this.standardCostMatrix);
-              /*
-              log.debug("" + this.latencyMatrix[0][1]);
-              log.debug("" + this.mediumLatencyMatrix[0][1]);
-              log.debug("" + this.standardCostMatrix[0][1]);
-              /******************************************Debug***************************************/
             }
+
+            /********************************************Debug**********************************
+            /
+            log.debug("shortes Path "+stp.getPath(edgeMatrix[0][1].getHeadNodeConnector().getNode(),
+            edgeMatrix[1][2].getTailNodeConnector().getNode()));
+
+            log.debug("Distancia "+stp.getDistance(edgeMatrix[0][1].getHeadNodeConnector().getNode(),
+            edgeMatrix[1][2].getTailNodeConnector().getNode()));
+
+            traceLongMatrix(this.standardCostMatrix);
+            /*
+            log.debug("" + this.latencyMatrix[0][1]);
+            log.debug("" + this.mediumLatencyMatrix[0][1]);
+            log.debug("" + this.standardCostMatrix[0][1]);
+            */
+
+            /******************************************Debug***************************************/
+
             return PacketResult.CONSUME;
           }
         }
@@ -397,7 +425,7 @@ public class RouteHandler implements IListenDataPacket {
           }
           else{
             if(this.edgeMatrix[i][j]==null){
-              this.standardCostMatrix[i][j]=null;
+              this.standardCostMatrix[i][j]=100000000000L;
             }
             else{
               this.standardCostMatrix[i][j] = 2*standardLatencyCost(this.edgeMatrix[i][j]) +
@@ -479,6 +507,9 @@ public class RouteHandler implements IListenDataPacket {
     private boolean checkLatencyMatrix(){
 
       boolean result = true;
+      if(this.edgeMatrix==null || this.latencyMatrix==null){
+        return false;
+      }
 
       for(int i=0; i<this.edgeMatrix.length; i++){
         for(int j=0; j<this.edgeMatrix[i].length; j++){
@@ -559,8 +590,8 @@ public class RouteHandler implements IListenDataPacket {
         for(int j=0; j<edgeMatrix[i].length; j++){
 
           if(edgeMatrix[i][j]!=null){
-            g.addEdge(edgeMatrix[i][j], edgeMatrix[i][j].getHeadNodeConnector().getNode(),
-            edgeMatrix[i][j].getTailNodeConnector().getNode());
+            g.addEdge(edgeMatrix[i][j], edgeMatrix[i][j].getTailNodeConnector().getNode(),
+            edgeMatrix[i][j].getHeadNodeConnector().getNode());
           }
 
         }
@@ -756,6 +787,7 @@ public class RouteHandler implements IListenDataPacket {
 
       Map<Node, InetAddress> temp = new HashMap<Node, InetAddress>();
       temp.put(node, addr);
+      this.tableIP.remove(temp);
       this.tableIP.put(temp, connector);
 
     }
@@ -812,8 +844,8 @@ public class RouteHandler implements IListenDataPacket {
 
     private void putEdge(Edge edge){
 
-      int node1 = getNodeConnectorIndex(edge.getHeadNodeConnector());
-      int node2 = getNodeConnectorIndex(edge.getTailNodeConnector());
+      int node1 = getNodeConnectorIndex(edge.getTailNodeConnector());
+      int node2 = getNodeConnectorIndex(edge.getHeadNodeConnector());
 
       this.edgeMatrix[node1][node2] = edge;
       log.trace("Put the edge in the position: " + node1 + " " +node2);
@@ -958,6 +990,69 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
+    *This function reordenate a Edge<List> to put in the correct order.
+    *@param path The List<Edge>
+    *@param srcNode The first Node
+    *@param dstNode The last Node
+    *@return The definitive List<Edge>
+    */
+
+    private List<Edge> reordenateList(List<Edge> path, Node srcNode, Node dstNode){
+      boolean orden = true;
+      boolean orientacion = true;
+
+      List<Edge> result = new ArrayList();
+
+      if(path.get(0).getTailNodeConnector().getNode().equals(srcNode)){
+        orden=true;
+        orientacion=true;
+      }
+      else if(path.get(0).getHeadNodeConnector().getNode().equals(srcNode)){
+        orden=true;
+        orientacion=false;
+      }
+      else if(path.get(path.size()-1).getTailNodeConnector().getNode().equals(srcNode)){
+        orden=false;
+        orientacion=true;
+      }
+      else if(path.get(path.size()-1).getHeadNodeConnector().getNode().equals(srcNode)){
+        orden=false;
+        orientacion=false;
+      }
+
+      int i=0;
+      int n1=0;
+      int n2=0;
+
+      if(!orden){
+        i=path.size()-1;
+      }
+      int index;
+      for(int j=0; j<path.size();j++){
+
+        if(!orden){
+          index=i-j;
+        }
+        else{
+          index=j;
+        }
+
+        Edge tempEdge = path.get(index);
+
+        if(!orientacion){
+          n1=getNodeConnectorIndex(tempEdge.getHeadNodeConnector());
+          n2=getNodeConnectorIndex(tempEdge.getTailNodeConnector());
+        }else{
+          n1=getNodeConnectorIndex(tempEdge.getTailNodeConnector());
+          n2=getNodeConnectorIndex(tempEdge.getHeadNodeConnector());
+        }
+        result.add(this.edgeMatrix[n1][n2]);
+      }
+      return result;
+
+    }
+
+    /**
     *This function return the time for a Edge Packet association
     *@param edge The edge
     *@param packet The packet
@@ -993,8 +1088,8 @@ public class RouteHandler implements IListenDataPacket {
     */
 
     private Long standardLatencyCost(Edge edge){
-      int i = getNodeConnectorIndex(edge.getHeadNodeConnector());
-      int j = getNodeConnectorIndex(edge.getTailNodeConnector());
+      int i = getNodeConnectorIndex(edge.getTailNodeConnector());
+      int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
 
       Long ret1 = 0L;
       Long ret2 = 0L;
@@ -1104,7 +1199,7 @@ public class RouteHandler implements IListenDataPacket {
       for(int i=0; i<matrix.length; i++){
         for(int j=0; j<matrix[i].length; j++){
 
-          log.trace(""+matrix[i][j]);
+          log.debug("Element "+i+ " "+j+" is: "+matrix[i][j]);
 
         }
       }
@@ -1142,8 +1237,8 @@ public class RouteHandler implements IListenDataPacket {
         firstPacket=false;
       }
 
-      int node1 = getNodeConnectorIndex(edge.getHeadNodeConnector());
-      int node2 = getNodeConnectorIndex(edge.getTailNodeConnector());
+      int node1 = getNodeConnectorIndex(edge.getTailNodeConnector());
+      int node2 = getNodeConnectorIndex(edge.getHeadNodeConnector());
 
       ArrayList<Long> temp = this.edgeMediumMapTime.get(edge);
 
@@ -1211,7 +1306,7 @@ public class RouteHandler implements IListenDataPacket {
 
       updateEdgeStatistics();
       buildStandardCostMatrix();
-      stp = new DijkstraShortestPath<Node, Edge>(g, costTransformer);
+      stp = new DijkstraShortestPath<Node, Edge>(g);
     }
 
 }
