@@ -106,14 +106,10 @@ public class RouteHandler implements IListenDataPacket {
   private Map<Edge, Set<Packet>> edgePackets = new HashMap<Edge, Set<Packet>>();
   private ConcurrentMap<Map<Edge, Packet>, Long> packetTime = new ConcurrentHashMap<Map<Edge, Packet>, Long>();
 
-  private boolean firstPacket=true;
-
   private Long standardCostMatrix[][];
 
   private ConcurrentMap<Edge, Map<String, ArrayList>> edgeStatistics = new ConcurrentHashMap<Edge, Map<String, ArrayList>>();
   private Map<String, Long> maxStatistics = new HashMap<String, Long>();
-
-  private ConcurrentMap<Node, Map<Node, Path>> pathMap = new ConcurrentHashMap<Node, Map<Node, Path>>();
 
   private Map<Edge, Long> edgeCostMap = new HashMap<Edge, Long>();
 
@@ -121,15 +117,18 @@ public class RouteHandler implements IListenDataPacket {
 
   private Graph<Node, Edge> g = new SparseMultigraph();
 
-  private DijkstraShortestPath<Node, Edge> stp;
+  private DijkstraShortestPath<Node, Edge> standardShortestPath;
 
   private Map<Edge, ArrayList> edgeMediumMapTime = new HashMap<Edge, ArrayList>();
 
-  private ConcurrentMap<Map<Node, InetAddress>, Map<NodeConnector, Integer>> addressPortMap =
-  new ConcurrentHashMap<Map<Node, InetAddress>, Map<NodeConnector, Integer>>();
+  private ConcurrentMap<Map<Node, InetAddress>, Map<Integer, NodeConnector>> addressPortMap =
+  new ConcurrentHashMap<Map<Node, InetAddress>, Map<Integer, NodeConnector>>();
 
   private ConcurrentMap<Map<Node, Node>, Map<Integer, List>> pathPortMap = new
   ConcurrentHashMap<Map<Node, Node>, Map<Integer, List>>();
+
+  private ConcurrentMap<Map<Node, Node>, List> standardNodePath = new
+  ConcurrentHashMap<Map<Node, Node>, List>();
 
   private short idleTimeOut = 20;
   private short hardTimeOut = 30;
@@ -149,6 +148,9 @@ public class RouteHandler implements IListenDataPacket {
 
   /*************************************/
   private final Long defaultCost = 5L; //If we don't have any latency measure
+
+  private final Integer videoPort = 7545;
+  private final Integer audioPort = 2543;
   /*************************************/
 
   static private InetAddress intToInetAddress(int i) {
@@ -301,83 +303,75 @@ public class RouteHandler implements IListenDataPacket {
 
           if(l4Datagram instanceof ICMP){
 
+            NodeConnector egressConnector=null;
             if(!checkLatencyMatrix()){
               floodPacket(inPkt, node, ingressConnector);
-            }
-            else{
-              if(hasHostConnected(ingressConnector)){
-                learnIPAddress(node, srcAddr, ingressConnector);
-              }
+            }else{
 
-              Node tempSrcNode = findHost(srcAddr).getNode();
-              Node tempDstNode = findHost(dstAddr).getNode();
+              NodeConnector tempSrcConnector = findHost(srcAddr);
+              Node tempSrcNode = tempSrcConnector.getNode();
+              NodeConnector tempDstConnector = findHost(dstAddr);
+              Node tempDstNode = tempDstConnector.getNode();
 
-              List<Edge> tempPath = stp.getPath(tempSrcNode, tempDstNode);
-              List<Edge> definitivePath;
+              Map<Node, Node> finalNodes = new HashMap<Node,Node>();
+              finalNodes.put(tempSrcNode, tempDstNode);
 
-              boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(tempSrcNode);
-              if(!temp){
-                definitivePath = reordenateList(tempPath, tempSrcNode, tempDstNode);
-                log.trace("reordenating");
+              if(standardNodePath.containsKey(finalNodes)){
+                List<Edge> definitivePath = standardNodePath.get(finalNodes);
+                egressConnector = installListFlows(definitivePath, srcAddr, srcMAC_B, dstAddr, dstMAC_B, node,
+                tempSrcConnector, tempDstConnector);
               }
               else{
-                definitivePath = tempPath;
-              }
-              log.trace("definitivePath "+definitivePath);
 
-              NodeConnector egressConnector = getIPNodeConnector(node, dstAddr);
+                List<Edge> tempPath = standardShortestPath.getPath(tempSrcNode, tempDstNode);
+                List<Edge> definitivePath;
 
-              if(egressConnector==null){
-                floodPacket(inPkt, node, ingressConnector);
-              }
-              else{
-                if(programFlow( srcAddr, srcMAC_B, dstAddr, dstMAC_B, egressConnector, node) ){
-
-                  log.trace("Flow installed on " + node + " in the port " + egressConnector);
-
+                boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(tempSrcNode);
+                if(!temp){
+                  definitivePath = reordenateList(tempPath, tempSrcNode, tempDstNode);
+                  log.trace("reordenating");
                 }
                 else{
-                  log.trace("Error trying to install the flow");
+                  definitivePath = tempPath;
                 }
-                if(!hasHostConnected(egressConnector)){
-                  Edge downEdge = getDownEdge(node, egressConnector);
-                  if(downEdge!= null){
-                    putPacket(downEdge, pkt);
-                  }
-                }
+                log.trace("definitivePath "+definitivePath);
 
-                //Send the packet for the selected Port.
-                inPkt.setOutgoingNodeConnector(egressConnector);
-                this.dataPacketService.transmitDataPacket(inPkt);
+                standardNodePath.put(finalNodes, definitivePath);
+
+                egressConnector = installListFlows(definitivePath, srcAddr, srcMAC_B, dstAddr, dstMAC_B, node,
+                tempSrcConnector, tempDstConnector);
+
               }
+              if(!hasHostConnected(egressConnector)){
+                Edge downEdge = getDownEdge(node, egressConnector);
+                if(downEdge!= null){
+                  putPacket(downEdge, pkt);
+                }
+              }
+              log.debug(""+egressConnector);
+              //Send the packet for the selected Port.
+              inPkt.setOutgoingNodeConnector(egressConnector);
+              this.dataPacketService.transmitDataPacket(inPkt);
+
+              /********************************************Debug**********************************
+              *
+              traceLongMatrix(this.standardCostMatrix);
+
+              log.debug("" + this.latencyMatrix[0][1]);
+              log.debug("" + this.mediumLatencyMatrix[0][1]);
+              log.debug("" + this.standardCostMatrix[0][1]);
+
+
+              /******************************************Debug***************************************/
 
             }
 
-            /********************************************Debug**********************************
-            /
-            log.debug("shortes Path "+stp.getPath(edgeMatrix[0][1].getHeadNodeConnector().getNode(),
-            edgeMatrix[1][2].getTailNodeConnector().getNode()));
-
-            log.debug("Distancia "+stp.getDistance(edgeMatrix[0][1].getHeadNodeConnector().getNode(),
-            edgeMatrix[1][2].getTailNodeConnector().getNode()));
-
-            traceLongMatrix(this.standardCostMatrix);
-            /*
-            log.debug("" + this.latencyMatrix[0][1]);
-            log.debug("" + this.mediumLatencyMatrix[0][1]);
-            log.debug("" + this.standardCostMatrix[0][1]);
-            */
-
-            /******************************************Debug***************************************/
-
             return PacketResult.CONSUME;
+
           }
         }
-
       }
-
       return PacketResult.IGNORED;
-
     }
 
     /**
@@ -776,6 +770,55 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
+    *Function that is called when is necesarry to install a List of flows
+    *All the flows will have two timeOut, idle and Hard.
+    *@param path The Edge List
+    *@param srcAddr The source IPv4 Address
+    *@param srcMAC_B The srcMACAddress in byte format
+    *@param dstAddr The destination IPV4 Address
+    *@param dstMAC_B The dstMACAddress in byte format
+    *@param node The node where we have to return the egressConnector
+    *@param srcConnector The Connector src
+    *@param dstConnector The Connector dst
+    *@return The NodeConnector for the node
+    */
+
+    private NodeConnector installListFlows(List<Edge> path, InetAddress srcAddr, byte[] srcMAC_B,
+    InetAddress dstAddr, byte[] dstMAC_B, Node node, NodeConnector srcConnector, NodeConnector dstConnector){
+      NodeConnector result = null;
+      for(int i=0; i<path.size();i++){
+        Edge tempEdge = path.get(i);
+        NodeConnector tempConnector = tempEdge.getTailNodeConnector();
+        Node tempNode = tempConnector.getNode();
+        if(tempNode.equals(node)){
+          result = tempConnector;
+        }
+
+        if(programFlow( srcAddr, srcMAC_B, dstAddr, dstMAC_B, tempConnector, tempNode) ){
+
+          log.trace("Flow installed on " + node + " in the port " + tempConnector);
+
+        }
+        else{
+          log.trace("Error trying to install the flow");
+        }
+
+      }
+
+      if(programFlow( srcAddr, srcMAC_B, dstAddr, dstMAC_B, dstConnector, dstConnector.getNode()) ){
+
+        log.trace("Flow installed on " + dstConnector.getNode() + " in the port " + dstConnector);
+
+      }
+      else{
+        log.trace("Error trying to install the flow");
+      }
+
+
+      return result;
+    }
+
+    /**
     *Function that is called when is necessary to put a Association Node,IP and NodeConnector
     *in ourt IPTable.
     *@param node The node where we have to create the association.
@@ -793,7 +836,7 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
-    *Function that is called when is necesarry to install
+    *Function that is called when is necesarry to install a flow
     *All the flows will have two timeOut, idle and Hard.
     *@param srcAddr The source IPv4 Address
     *@param srcMAC_B The srcMACAddress in byte format
@@ -1053,6 +1096,16 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
+    *This function restart the latency and mediumLatencyMatrix
+    */
+
+    private void resetLatencyMatrix(){
+      this.latencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
+      this.mediumLatencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
+      initializeEdgeMediumTime();
+    }
+
+    /**
     *This function return the time for a Edge Packet association
     *@param edge The edge
     *@param packet The packet
@@ -1230,12 +1283,6 @@ public class RouteHandler implements IListenDataPacket {
     */
 
     private void updateLatencyMatrix(Edge edge, Long t){
-      if(firstPacket){
-        this.latencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
-        this.mediumLatencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
-        initializeEdgeMediumTime();
-        firstPacket=false;
-      }
 
       int node1 = getNodeConnectorIndex(edge.getTailNodeConnector());
       int node2 = getNodeConnectorIndex(edge.getHeadNodeConnector());
@@ -1300,13 +1347,17 @@ public class RouteHandler implements IListenDataPacket {
         this.nodeEdges = edges;
         buildEdgeMatrix(edges);
         log.trace("The new map is " + this.nodeEdges);
-        this.firstPacket = true;
+        resetLatencyMatrix();
         createTopologyGraph();
+        this.standardShortestPath = new DijkstraShortestPath<Node, Edge>(g, costTransformer);
+        this.addressPortMap.clear();
+        this.pathPortMap.clear();
+        this.packetTime.clear();
+        this.edgePackets.clear();
+        this.standardNodePath.clear();
       }
-
       updateEdgeStatistics();
       buildStandardCostMatrix();
-      stp = new DijkstraShortestPath<Node, Edge>(g);
     }
 
 }
