@@ -302,9 +302,9 @@ public class RouteHandler implements IListenDataPacket {
           Object l4Datagram = ipv4Pkt.getPayload();
 
           if(l4Datagram instanceof ICMP){
-
             NodeConnector egressConnector=null;
             if(!checkLatencyMatrix()){
+              log.debug("Inundando");
               floodPacket(inPkt, node, ingressConnector);
             }else{
 
@@ -315,17 +315,15 @@ public class RouteHandler implements IListenDataPacket {
 
               Map<Node, Node> finalNodes = new HashMap<Node,Node>();
               finalNodes.put(tempSrcNode, tempDstNode);
-
               if(standardNodePath.containsKey(finalNodes)){
                 List<Edge> definitivePath = standardNodePath.get(finalNodes);
                 egressConnector = installListFlows(definitivePath, srcAddr, srcMAC_B, dstAddr, dstMAC_B, node,
                 tempSrcConnector, tempDstConnector);
               }
               else{
-
                 List<Edge> tempPath = standardShortestPath.getPath(tempSrcNode, tempDstNode);
                 List<Edge> definitivePath;
-
+                log.debug(""+tempPath);
                 boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(tempSrcNode);
                 if(!temp){
                   definitivePath = reordenateList(tempPath, tempSrcNode, tempDstNode);
@@ -372,6 +370,38 @@ public class RouteHandler implements IListenDataPacket {
         }
       }
       return PacketResult.IGNORED;
+    }
+
+    /**
+     * Function called by the dependency manager when all the required
+     * dependencies are satisfied
+     *
+     */
+    @SuppressWarnings({ "unchecked", "rawtypes" })
+    public void init() {
+        log.debug("Routing init() is called");
+        Map<Node, Set<Edge>> edges = this.topologyManager.getNodeEdges();
+        this.nodeEdges = edges;
+        buildEdgeMatrix(edges);
+        log.trace("The new map is " + this.nodeEdges);
+        resetLatencyMatrix();
+        createTopologyGraph();
+        this.standardShortestPath = new DijkstraShortestPath<Node, Edge>(g, costTransformer);
+        this.addressPortMap.clear();
+        this.pathPortMap.clear();
+        this.packetTime.clear();
+        this.edgePackets.clear();
+        this.standardNodePath.clear();
+    }
+
+    /**
+     * Function called by the dependency manager when at least one dependency
+     * become unsatisfied or when the component is shutting down because for
+     * example bundle is being stopped.
+     *
+     */
+    void destroy() {
+        log.debug("Routing destroy() is called");
     }
 
     /**
