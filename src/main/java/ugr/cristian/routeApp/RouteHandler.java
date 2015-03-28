@@ -146,6 +146,10 @@ public class RouteHandler implements IListenDataPacket {
   /*************************************/
   private final Long defaultCost = 5L; //If we don't have any latency measure
 
+  private int flood = 0;
+
+  private final int MAXFLOODPACKET = 5;
+
   private final Integer videoPort = 7545;
   private final Integer audioPort = 2543;
   /*************************************/
@@ -300,8 +304,8 @@ public class RouteHandler implements IListenDataPacket {
 
           if(l4Datagram instanceof ICMP){
             NodeConnector egressConnector=null;
-            if(!checkLatencyMatrix()){
-              log.debug("Inundando");
+            if(flood<MAXFLOODPACKET){
+              flood++;
               floodPacket(inPkt, node, ingressConnector);
             }else{
 
@@ -315,9 +319,8 @@ public class RouteHandler implements IListenDataPacket {
 
               List<Edge> tempPath = standardShortestPath.getPath(tempSrcNode, tempDstNode);
               List<Edge> definitivePath;
-              log.debug(""+tempPath);
               boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(tempSrcNode);
-              
+
               if(!temp){
                 definitivePath = reordenateList(tempPath, tempSrcNode, tempDstNode);
                 log.trace("reordenating");
@@ -325,38 +328,44 @@ public class RouteHandler implements IListenDataPacket {
               else{
                 definitivePath = tempPath;
               }
-              log.debug("definitivePath "+definitivePath);
+              if(definitivePath != null){
 
-              egressConnector = installListFlows(definitivePath, srcAddr, srcMAC_B, dstAddr, dstMAC_B, node,
-              tempSrcConnector, tempDstConnector);
+                egressConnector = installListFlows(definitivePath, srcAddr, srcMAC_B, dstAddr, dstMAC_B, node,
+                tempSrcConnector, tempDstConnector);
 
-              }
-              if(!hasHostConnected(egressConnector)){
-                Edge downEdge = getDownEdge(node, egressConnector);
-                if(downEdge!= null){
-                  putPacket(downEdge, pkt);
+
+                if(!hasHostConnected(egressConnector)){
+                  Edge downEdge = getDownEdge(node, egressConnector);
+                  if(downEdge!= null){
+                    putPacket(downEdge, pkt);
+                  }
                 }
+
+                if(egressConnector!= null){
+                //Send the packet for the selected Port.
+                  inPkt.setOutgoingNodeConnector(egressConnector);
+                  this.dataPacketService.transmitDataPacket(inPkt);
+                }else{
+                  floodPacket(inPkt, node, ingressConnector);
+                }
+                /********************************************Debug**********************************
+                */
+
+                /*
+                log.debug("" + this.latencyMatrix[0][1]);
+                log.debug("" + this.mediumLatencyMatrix[0][1]);
+                log.debug("" + this.standardCostMatrix[0][1]);
+
+
+                /*************************************** ***Debug***************************************/
+                return PacketResult.CONSUME;
+
+              }else{
+                log.trace("Destination host is unrecheable!");
+                return PacketResult.IGNORED;
               }
 
-              //Send the packet for the selected Port.
-              inPkt.setOutgoingNodeConnector(egressConnector);
-              this.dataPacketService.transmitDataPacket(inPkt);
-
-              /********************************************Debug**********************************
-              */
-
-              /*
-              log.debug("" + this.latencyMatrix[0][1]);
-              log.debug("" + this.mediumLatencyMatrix[0][1]);
-              log.debug("" + this.standardCostMatrix[0][1]);
-
-
-              /******************************************Debug***************************************/
-
-
-
-            return PacketResult.CONSUME;
-
+            }
           }
         }
       }
@@ -377,7 +386,11 @@ public class RouteHandler implements IListenDataPacket {
         log.trace("The new map is " + this.nodeEdges);
         resetLatencyMatrix();
         createTopologyGraph();
+
         this.standardShortestPath = new DijkstraShortestPath<Node, Edge>(g, costTransformer);
+
+        flood = 0;
+
         this.addressPortMap.clear();
         this.pathPortMap.clear();
         this.packetTime.clear();
@@ -443,8 +456,8 @@ public class RouteHandler implements IListenDataPacket {
               this.standardCostMatrix[i][j]=null;
             }
             else{
-              this.standardCostMatrix[i][j] = 3*standardLatencyCost(this.edgeMatrix[i][j]) +
-              standardStatisticsMapCost(this.edgeMatrix[i][j]);
+              this.standardCostMatrix[i][j] = standardLatencyCost(this.edgeMatrix[i][j]) +
+              standardStatisticsMapCost(this.edgeMatrix[i][j])/10;
             }
           }
           edgeCostMap.put(this.edgeMatrix[i][j], this.standardCostMatrix[i][j]);
@@ -1042,6 +1055,15 @@ public class RouteHandler implements IListenDataPacket {
     }
 
     /**
+    *Function that is called when is necessary to check the flows on the nodes
+    *@param edges The new node association Set<Edge> that have to be compared with the old topology
+    */
+
+    private void removeOldFlow(Map<Node, Set<Edge>> edges){
+
+    }
+
+    /**
     *This function is called when a association Edge, Packet, Time are wrong.
     *@param edge The edge identificator
     *@param packet The packet
@@ -1367,6 +1389,7 @@ public class RouteHandler implements IListenDataPacket {
       Map<Node, Set<Edge>> edges = this.topologyManager.getNodeEdges();
 
       if(nodeEdges.equals(null) || !nodeEdges.equals(edges)){
+        removeOldFlow(edges);
         this.nodeEdges = edges;
         buildEdgeMatrix(edges);
         log.trace("The new map is " + this.nodeEdges);
@@ -1374,6 +1397,9 @@ public class RouteHandler implements IListenDataPacket {
         createTopologyGraph();
 
         this.standardShortestPath = new DijkstraShortestPath<Node, Edge>(g, costTransformer);
+
+        flood=0;
+
         this.addressPortMap.clear();
         this.pathPortMap.clear();
         this.packetTime.clear();
