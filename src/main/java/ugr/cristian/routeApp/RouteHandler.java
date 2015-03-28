@@ -127,9 +127,6 @@ public class RouteHandler implements IListenDataPacket {
   private ConcurrentMap<Map<Node, Node>, Map<Integer, List>> pathPortMap = new
   ConcurrentHashMap<Map<Node, Node>, Map<Integer, List>>();
 
-  private ConcurrentMap<Map<Node, Node>, List> standardNodePath = new
-  ConcurrentHashMap<Map<Node, Node>, List>();
-
   private short idleTimeOut = 20;
   private short hardTimeOut = 30;
 
@@ -315,29 +312,23 @@ public class RouteHandler implements IListenDataPacket {
 
               Map<Node, Node> finalNodes = new HashMap<Node,Node>();
               finalNodes.put(tempSrcNode, tempDstNode);
-              if(standardNodePath.containsKey(finalNodes)){
-                List<Edge> definitivePath = standardNodePath.get(finalNodes);
-                egressConnector = installListFlows(definitivePath, srcAddr, srcMAC_B, dstAddr, dstMAC_B, node,
-                tempSrcConnector, tempDstConnector);
+
+              List<Edge> tempPath = standardShortestPath.getPath(tempSrcNode, tempDstNode);
+              List<Edge> definitivePath;
+              log.debug(""+tempPath);
+              boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(tempSrcNode);
+              
+              if(!temp){
+                definitivePath = reordenateList(tempPath, tempSrcNode, tempDstNode);
+                log.trace("reordenating");
               }
               else{
-                List<Edge> tempPath = standardShortestPath.getPath(tempSrcNode, tempDstNode);
-                List<Edge> definitivePath;
-                log.debug(""+tempPath);
-                boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(tempSrcNode);
-                if(!temp){
-                  definitivePath = reordenateList(tempPath, tempSrcNode, tempDstNode);
-                  log.trace("reordenating");
-                }
-                else{
-                  definitivePath = tempPath;
-                }
-                log.trace("definitivePath "+definitivePath);
+                definitivePath = tempPath;
+              }
+              log.debug("definitivePath "+definitivePath);
 
-                standardNodePath.put(finalNodes, definitivePath);
-
-                egressConnector = installListFlows(definitivePath, srcAddr, srcMAC_B, dstAddr, dstMAC_B, node,
-                tempSrcConnector, tempDstConnector);
+              egressConnector = installListFlows(definitivePath, srcAddr, srcMAC_B, dstAddr, dstMAC_B, node,
+              tempSrcConnector, tempDstConnector);
 
               }
               if(!hasHostConnected(egressConnector)){
@@ -346,15 +337,15 @@ public class RouteHandler implements IListenDataPacket {
                   putPacket(downEdge, pkt);
                 }
               }
-              log.debug(""+egressConnector);
+
               //Send the packet for the selected Port.
               inPkt.setOutgoingNodeConnector(egressConnector);
               this.dataPacketService.transmitDataPacket(inPkt);
 
               /********************************************Debug**********************************
-              *
-              traceLongMatrix(this.standardCostMatrix);
+              */
 
+              /*
               log.debug("" + this.latencyMatrix[0][1]);
               log.debug("" + this.mediumLatencyMatrix[0][1]);
               log.debug("" + this.standardCostMatrix[0][1]);
@@ -362,7 +353,7 @@ public class RouteHandler implements IListenDataPacket {
 
               /******************************************Debug***************************************/
 
-            }
+
 
             return PacketResult.CONSUME;
 
@@ -391,7 +382,6 @@ public class RouteHandler implements IListenDataPacket {
         this.pathPortMap.clear();
         this.packetTime.clear();
         this.edgePackets.clear();
-        this.standardNodePath.clear();
     }
 
     /**
@@ -411,6 +401,7 @@ public class RouteHandler implements IListenDataPacket {
 
     private void buildEdgeMatrix(Map<Node, Set<Edge>> edges){
 
+      this.edgeMatrix = null;
       this.edgeMatrix = new Edge[edges.size()][edges.size()];
       Set<Node> nodes = edges.keySet();
 
@@ -449,10 +440,10 @@ public class RouteHandler implements IListenDataPacket {
           }
           else{
             if(this.edgeMatrix[i][j]==null){
-              this.standardCostMatrix[i][j]=100000000000L;
+              this.standardCostMatrix[i][j]=null;
             }
             else{
-              this.standardCostMatrix[i][j] = 2*standardLatencyCost(this.edgeMatrix[i][j]) +
+              this.standardCostMatrix[i][j] = 3*standardLatencyCost(this.edgeMatrix[i][j]) +
               standardStatisticsMapCost(this.edgeMatrix[i][j]);
             }
           }
@@ -540,14 +531,16 @@ public class RouteHandler implements IListenDataPacket {
 
           if(edgeMatrix[i][j] != null){
             if(latencyMatrix[i][j] == null){
-              result = false;
+
+              return false;
             }
 
           }
 
         }
       }
-      return result;
+      return true;
+
     }
 
     /**
@@ -1319,7 +1312,7 @@ public class RouteHandler implements IListenDataPacket {
 
       ArrayList<Long> temp = this.edgeMediumMapTime.get(edge);
 
-      if(temp.size()==10){
+      if(temp.size()==5){
         temp.remove(0);
         temp.add(t);
       }
@@ -1379,12 +1372,12 @@ public class RouteHandler implements IListenDataPacket {
         log.trace("The new map is " + this.nodeEdges);
         resetLatencyMatrix();
         createTopologyGraph();
+
         this.standardShortestPath = new DijkstraShortestPath<Node, Edge>(g, costTransformer);
         this.addressPortMap.clear();
         this.pathPortMap.clear();
         this.packetTime.clear();
         this.edgePackets.clear();
-        this.standardNodePath.clear();
       }
       updateEdgeStatistics();
       buildStandardCostMatrix();
